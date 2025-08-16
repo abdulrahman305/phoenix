@@ -29,3 +29,5 @@ types-requests
 types-setuptools
 types-tabulate
 types-tqdm
+h11>=0.16.0 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
