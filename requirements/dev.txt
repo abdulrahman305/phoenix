@@ -8,3 +8,4 @@ fast-hdbscan
 umap-learn
 boto3
 glom
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
