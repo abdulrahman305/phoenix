@@ -68,7 +68,7 @@ The preview evals library provides powerful input mapping capabilities that allo
 The `input_mapping` parameter accepts several types of mappings:
 
 1. **Simple key mapping**: `{"field": "key"}` - maps evaluator field to input key
-2. **Path mapping**: `{"field": "nested.path"}` - uses spec syntax from [glom](https://glom.readthedocs.io/en/latest/tutorial.html#access-granted)
+2. **Path mapping**: `{"field": "nested.path"}` - uses JSON path syntax from [jsonpath-ng](https://pypi.org/project/jsonpath-ng/)
 3. **Callable mapping**: `{"field": lambda x: x["key"]}` - custom extraction logic
 
 ### Path Mapping Examples
@@ -83,14 +83,13 @@ input_mapping = {
 
 # Array indexing
 input_mapping = {
-    "first_doc": "input.documents.0",
-    "last_doc": "input.documents.-1"
+    "first_doc": "input.documents[0]",
+    "last_doc": "input.documents[-1]"
 }
 
 # Combined nesting and list indexing
 input_mapping = {
-    "user_query": "data.user.messages.0.content",
-    "model_response": "data.assistant.messages.0.content"
+    "user_query": "data.user.messages[0].content",
 }
 ```
 
@@ -196,6 +195,75 @@ scores = bound_evaluator({
 - **Static validation**: Mapping syntax is validated at creation time
 - **Introspection**: `describe()` shows mapping details alongside schema
 
+## Dataframe Evaluation
+
+Run multiple evaluators over a pandas dataframe. The output is an augmented dataframe with two added columns per score:
+
+1. `{score_name}_score` contains the JSON serialized score (or None if the evaluation failed)
+2. `{evaluator_name}_execution_details` contains information about the execution status, duration, and any exceptions that ocurred.
+
+### Notes:
+
+- Use `bind_evaluator` to bind `input_mappings` to your evaluators so they match your dataframe columns.
+- Do not use dot notation in the dataframe column names e.g. "input.query" because it will interfere with the input mapping.
+- Score name collisions: If multiple evaluators return scores with the same name,
+      they will write to the same column (e.g., 'same_name_score'). This can lead to
+      data loss as later scores overwrite earlier ones.
+- Similarly, evaluator names should be unique to ensure execution_details columns don't collide.
+- Failed evaluations: If an evaluation fails, the failure details will be recorded
+      in the execution_details column and the score will be None.
+
+### Examples 
+Evaluator with more than one score returned:
+```python
+import pandas as pd
+
+from phoenix.evals.preview.evaluators import evaluate_dataframe
+from phoenix.evals.preview.metrics import PrecisionRecallFScore
+
+precision_recall_fscore = PrecisionRecallFScore(positive_label="Yes")
+
+df = pd.DataFrame(
+    {
+        "output": [["Yes", "Yes", "No"], ["Yes", "No", "No"]],
+        "expected": [["Yes", "No", "No"], ["Yes", "No", "No"]],
+    }
+)
+
+result = evaluate_dataframe(df, [precision_recall_fscore])
+result.head()
+```
+Running multiple evaluators, one bound with an input_mapping:
+```python
+from phoenix.evals.preview.llm import LLM
+from phoenix.evals.preview.evaluators import bind_evaluator
+from phoenix.evals.preview.metrics import HallucinationEvaluator, exact_match
+
+
+df = pd.DataFrame(
+    {
+        # exact_match columns
+        "output": ["Yes", "Yes", "No"], 
+        "expected": ["Yes", "No", "No"], 
+        # hallucination columns (need mapping)
+        "context": ["This is a test", "This is another test", "This is a third test"],
+        "query": [ 
+            "What is the name of this test?",
+            "What is the name of this test?",
+            "What is the name of this test?",
+        ],
+        "response": ["First test", "Another test", "Third test"],
+    }
+)
+
+llm = LLM(provider="openai", model="gpt-4o")
+hallucination_evaluator = bind_evaluator(
+    HallucinationEvaluator(llm=llm), {"input": "query", "output": "response"}
+)
+
+result = evaluate_dataframe(df, [exact_match, hallucination_evaluator])
+result.head()
+```
 
 ## FAQ
 
