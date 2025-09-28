@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<39177da82a40833274549e782e011315>>
+ * @generated SignedSource<<d9d70392c9f2d8f47e45c1cca4c7cdb9>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -31,10 +31,13 @@ export type ExperimentCompareListPage_aggregateData$data = {
               readonly tokens: number | null;
             };
           };
+          readonly datasetVersionId: string;
           readonly id: string;
+          readonly runCount: number;
         };
       }>;
     };
+    readonly id?: string;
   };
   readonly " $fragmentType": "ExperimentCompareListPage_aggregateData";
 };
@@ -45,6 +48,13 @@ export type ExperimentCompareListPage_aggregateData$key = {
 
 const node: ReaderFragment = (function(){
 var v0 = {
+  "alias": null,
+  "args": null,
+  "kind": "ScalarField",
+  "name": "id",
+  "storageKey": null
+},
+v1 = {
   "alias": null,
   "args": null,
   "kind": "ScalarField",
@@ -85,15 +95,16 @@ return {
         {
           "kind": "InlineFragment",
           "selections": [
+            (v0/*: any*/),
             {
               "alias": null,
               "args": null,
-              "concreteType": "ExperimentAnnotationSummary",
+              "concreteType": "DatasetExperimentAnnotationSummary",
               "kind": "LinkedField",
               "name": "experimentAnnotationSummaries",
               "plural": true,
               "selections": [
-                (v0/*: any*/),
+                (v1/*: any*/),
                 {
                   "alias": null,
                   "args": null,
@@ -141,11 +152,12 @@ return {
                       "name": "node",
                       "plural": false,
                       "selections": [
+                        (v0/*: any*/),
                         {
                           "alias": null,
                           "args": null,
                           "kind": "ScalarField",
-                          "name": "id",
+                          "name": "datasetVersionId",
                           "storageKey": null
                         },
                         {
@@ -153,6 +165,13 @@ return {
                           "args": null,
                           "kind": "ScalarField",
                           "name": "averageRunLatencyMs",
+                          "storageKey": null
+                        },
+                        {
+                          "alias": null,
+                          "args": null,
+                          "kind": "ScalarField",
+                          "name": "runCount",
                           "storageKey": null
                         },
                         {
@@ -199,7 +218,7 @@ return {
                           "name": "annotationSummaries",
                           "plural": true,
                           "selections": [
-                            (v0/*: any*/),
+                            (v1/*: any*/),
                             {
                               "alias": null,
                               "args": null,
@@ -232,6 +251,6 @@ return {
 };
 })();
 
-(node as any).hash = "936b49e6b7825e3d4373cfb03daf53b2";
+(node as any).hash = "fc91dd988055b0f691ffd85326f71915";
 
 export default node;

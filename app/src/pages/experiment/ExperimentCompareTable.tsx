@@ -9,9 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Pressable } from "react-aria-components";
 import { graphql, usePaginationFragment } from "react-relay";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   CellContext,
@@ -28,19 +26,15 @@ import { Switch } from "@arizeai/components";
 
 import {
   Button,
-  Card,
-  CardProps,
-  CopyToClipboardButton,
   Dialog,
   DialogCloseButton,
   DialogTrigger,
+  Empty,
   Flex,
   Heading,
   Icon,
   IconButton,
   Icons,
-  ListBox,
-  ListBoxItem,
   Loading,
   Modal,
   ModalOverlay,
@@ -48,13 +42,13 @@ import {
   PopoverArrow,
   Separator,
   Text,
+  Tooltip,
+  TooltipArrow,
+  TooltipTrigger,
+  TriggerWrap,
   View,
-  ViewSummaryAside,
 } from "@phoenix/components";
-import { AnnotationLabel } from "@phoenix/components/annotation";
 import { AnnotationDetailsContent } from "@phoenix/components/annotation/AnnotationDetailsContent";
-import { AnnotationNameAndValue } from "@phoenix/components/annotation/AnnotationNameAndValue";
-import { JSONBlock } from "@phoenix/components/code";
 import { JSONText } from "@phoenix/components/code/JSONText";
 import {
   DialogContent,
@@ -64,29 +58,20 @@ import {
 } from "@phoenix/components/dialog";
 import {
   ExperimentAverageRunTokenCosts,
-  ExperimentRunTokenCosts,
-  ExperimentRunTokenCount,
   useExperimentColors,
 } from "@phoenix/components/experiment";
 import { ExperimentActionMenu } from "@phoenix/components/experiment/ExperimentActionMenu";
 import { ExperimentAverageRunTokenCount } from "@phoenix/components/experiment/ExperimentAverageRunTokenCount";
-import { SequenceNumberToken } from "@phoenix/components/experiment/SequenceNumberToken";
-import { resizeHandleCSS } from "@phoenix/components/resize";
 import { CellTop, CompactJSONCell } from "@phoenix/components/table";
 import { borderedTableCSS, tableCSS } from "@phoenix/components/table/styles";
 import { TableEmpty } from "@phoenix/components/table/TableEmpty";
-import {
-  Tooltip,
-  TooltipArrow,
-  TooltipTrigger,
-} from "@phoenix/components/tooltip";
 import { LatencyText } from "@phoenix/components/trace/LatencyText";
-import { TokenCount } from "@phoenix/components/trace/TokenCount";
 import { Truncate } from "@phoenix/components/utility/Truncate";
 import { ExampleDetailsDialog } from "@phoenix/pages/example/ExampleDetailsDialog";
+import { ExperimentCompareDetailsDialog } from "@phoenix/pages/experiment/ExperimentCompareDetailsDialog";
 import { ExperimentNameWithColorSwatch } from "@phoenix/pages/experiment/ExperimentNameWithColorSwatch";
 import { ExperimentRunAnnotationFiltersList } from "@phoenix/pages/experiment/ExperimentRunAnnotationFiltersList";
-import { assertUnreachable } from "@phoenix/typeUtils";
+import { floatFormatter } from "@phoenix/utils/numberFormatUtils";
 import { makeSafeColumnId } from "@phoenix/utils/tableUtils";
 
 import { TraceDetails } from "../trace";
@@ -96,6 +81,9 @@ import type {
   ExperimentCompareTable_comparisons$key,
 } from "./__generated__/ExperimentCompareTable_comparisons.graphql";
 import type { ExperimentCompareTableQuery } from "./__generated__/ExperimentCompareTableQuery.graphql";
+import { ExperimentAnnotationButton } from "./ExperimentAnnotationButton";
+import { ExperimentRepeatedRunGroupMetadata } from "./ExperimentRepeatedRunGroupMetadata";
+import { ExperimentRepetitionSelector } from "./ExperimentRepetitionSelector";
 import { ExperimentRunFilterConditionField } from "./ExperimentRunFilterConditionField";
 
 type ExampleCompareTableProps = {
@@ -109,26 +97,23 @@ type Experiment = NonNullable<
   ExperimentCompareTable_comparisons$data["dataset"]["experiments"]
 >["edges"][number]["experiment"];
 
-type ExperimentInfoMap = Record<string, Experiment | null>;
+type ExperimentInfoMap = Record<string, Experiment>;
 
-type TableRow =
-  ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"] & {
-    id: string;
-    input: unknown;
-    referenceOutput: unknown;
-    runComparisonMap: Record<
-      string,
-      ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"]["runComparisonItems"][number]
-    >;
-  };
+type ExperimentComparison =
+  ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"];
+type ExperimentRepeatedRunGroup =
+  ExperimentComparison["repeatedRunGroups"][number];
+type AnnotationSummary =
+  ExperimentRepeatedRunGroup["annotationSummaries"][number];
+type ExperimentRun = ExperimentRepeatedRunGroup["runs"][number];
+type ExperimentRunAnnotation =
+  ExperimentRun["annotations"]["edges"][number]["annotation"];
 
-type ExperimentRun =
-  ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"]["runComparisonItems"][number]["runs"][number];
-
-const defaultCardProps: Partial<CardProps> = {
-  backgroundColor: "light",
-  borderColor: "light",
-  collapsible: true,
+type TableRow = ExperimentComparison & {
+  id: string;
+  input: unknown;
+  referenceOutput: unknown;
+  repeatedRunGroupsByExperimentId: Record<string, ExperimentRepeatedRunGroup>;
 };
 
 const tableWrapCSS = css`
@@ -146,12 +131,17 @@ const tableWrapCSS = css`
 const PAGE_SIZE = 50;
 export function ExperimentCompareTable(props: ExampleCompareTableProps) {
   const [dialog, setDialog] = useState<ReactNode>(null);
+  const [selectedExampleId, setSelectedExampleId] = useState<string | null>(
+    null
+  );
   const [displayFullText, setDisplayFullText] = useState(false);
   const { datasetId, baseExperimentId, compareExperimentIds } = props;
   const [filterCondition, setFilterCondition] = useState("");
+
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const { baseExperimentColor, getExperimentColor } = useExperimentColors();
+
   const { data, loadNext, hasNext, isLoadingNext, refetch } =
     usePaginationFragment<
       ExperimentCompareTableQuery,
@@ -185,14 +175,19 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
                     referenceOutput: output
                   }
                 }
-                runComparisonItems {
+                repeatedRunGroups {
+                  ...ExperimentRepeatedRunGroupMetadataFragment
+                  annotationSummaries {
+                    annotationName
+                    meanScore
+                  }
                   experimentId
                   runs {
                     id
+                    latencyMs
+                    repetitionNumber
                     output
                     error
-                    startTime
-                    endTime
                     trace {
                       traceId
                       projectId
@@ -234,6 +229,7 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
                     name
                     sequenceNumber
                     metadata
+                    datasetVersionId
                     project {
                       id
                     }
@@ -245,6 +241,7 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
                     }
                     averageRunLatencyMs
                     runCount
+                    repetitions
                   }
                 }
               }
@@ -264,30 +261,35 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
       }, {} as ExperimentInfoMap) || {}
     );
   }, [data]);
+
+  const baseExperiment = experimentInfoById[baseExperimentId];
+
   const tableData: TableRow[] = useMemo(
     () =>
       data.compareExperiments.edges.map((edge) => {
         const comparison = edge.comparison;
-        const runComparisonMap = comparison.runComparisonItems.reduce(
-          (acc, item) => {
-            acc[item.experimentId] = item;
-            return acc;
-          },
-          {} as Record<
-            string,
-            ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"]["runComparisonItems"][number]
-          >
-        );
+        const repeatedRunGroupsByExperimentId =
+          comparison.repeatedRunGroups.reduce(
+            (acc, group) => {
+              acc[group.experimentId] = group;
+              return acc;
+            },
+            {} as Record<string, ExperimentRepeatedRunGroup>
+          );
         return {
           ...comparison,
           id: comparison.example.id,
           input: comparison.example.revision.input,
           referenceOutput: comparison.example.revision.referenceOutput,
-          runComparisonMap,
+          repeatedRunGroupsByExperimentId,
         };
       }),
     [data]
   );
+
+  const exampleIds = useMemo(() => {
+    return tableData.map((row) => row.id);
+  }, [tableData]);
 
   const baseColumns: ColumnDef<TableRow>[] = useMemo(() => {
     return [
@@ -313,6 +315,7 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
                         setDialog(
                           <ExampleDetailsDialog
                             exampleId={row.original.example.id}
+                            datasetVersionId={baseExperiment.datasetVersionId}
                           />
                         );
                       }}
@@ -363,7 +366,7 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
         ),
       },
     ];
-  }, [displayFullText, setDialog]);
+  }, [baseExperiment.datasetVersionId, displayFullText, setDialog]);
 
   const experimentColumns: ColumnDef<TableRow>[] = useMemo(() => {
     return [baseExperimentId, ...compareExperimentIds].map(
@@ -415,93 +418,22 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
         minSize: 500,
         enableSorting: false,
         cell: ({ row }) => {
-          const runComparisonItem = row.original.runComparisonMap[experimentId];
-          const numRuns = runComparisonItem?.runs.length || 0;
-          if (numRuns === 0) {
-            return (
-              <PaddedCell>
-                <NotRunText />
-              </PaddedCell>
-            );
-          } else if (numRuns > 1) {
-            // TODO: Support repetitions
-            return <Text color="warning">{`${numRuns} runs`}</Text>;
-          }
-          // Only show the first run
-          const run = runComparisonItem?.runs[0];
+          const repeatedRunGroup =
+            row.original.repeatedRunGroupsByExperimentId[experimentId];
+          const annotationSummaries = repeatedRunGroup.annotationSummaries;
 
-          let traceButton = null;
-          const traceId = run?.trace?.traceId;
-          const projectId = run?.trace?.projectId;
-          if (traceId && projectId) {
-            traceButton = (
-              <TooltipTrigger>
-                <IconButton
-                  className="trace-button"
-                  size="S"
-                  aria-label="View run trace"
-                  onPress={() => {
-                    setDialog(
-                      <TraceDetailsDialog
-                        traceId={traceId}
-                        projectId={projectId}
-                        title={`Experiment Run Trace`}
-                      />
-                    );
-                  }}
-                >
-                  <Icon svg={<Icons.Trace />} />
-                </IconButton>
-                <Tooltip>
-                  <TooltipArrow />
-                  view run trace
-                </Tooltip>
-              </TooltipTrigger>
-            );
-          }
-          const runControls = (
-            <>
-              <TooltipTrigger>
-                <IconButton
-                  className="expand-button"
-                  size="S"
-                  aria-label="View example run details"
-                  onPress={() => {
-                    setDialog(
-                      <SelectedExampleDialog
-                        selectedExample={row.original}
-                        datasetId={datasetId}
-                        experimentInfoById={experimentInfoById}
-                      />
-                    );
-                  }}
-                >
-                  <Icon svg={<Icons.ExpandOutline />} />
-                </IconButton>
-                <Tooltip>
-                  <TooltipArrow />
-                  view experiment run
-                </Tooltip>
-              </TooltipTrigger>
-              {traceButton}
-            </>
-          );
-
-          return run ? (
-            <Flex direction="column" height="100%">
-              <CellTop extra={runControls}>
-                <ExperimentRunMetadata {...run} />
-              </CellTop>
-              <ExperimentRunOutput
-                {...run}
-                displayFullText={displayFullText}
-                setDialog={setDialog}
-              />
-            </Flex>
-          ) : (
-            <PaddedCell>
-              <NotRunText />
-            </PaddedCell>
+          return (
+            <ExperimentRunOutputCell
+              experimentRepetitionCount={
+                experimentInfoById[experimentId]?.repetitions ?? 0
+              }
+              repeatedRunGroup={repeatedRunGroup}
+              displayFullText={displayFullText}
+              setDialog={setDialog}
+              setSelectedExampleId={setSelectedExampleId}
+              tableRow={row.original}
+              annotationSummaries={annotationSummaries}
+            />
           );
         },
       })
@@ -510,7 +442,6 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
     baseExperimentId,
     baseExperimentColor,
     compareExperimentIds,
-    datasetId,
     displayFullText,
     experimentInfoById,
     getExperimentColor,
@@ -709,6 +640,38 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
         </div>
       </Flex>
       <ModalOverlay
+        isOpen={!!selectedExampleId}
+        onOpenChange={() => {
+          setSelectedExampleId(null);
+        }}
+      >
+        <Modal variant="slideover" size="fullscreen">
+          {selectedExampleId && (
+            <ExperimentCompareDetailsDialog
+              datasetId={datasetId}
+              datasetVersionId={baseExperiment.datasetVersionId}
+              selectedExampleId={selectedExampleId}
+              baseExperimentId={baseExperimentId}
+              compareExperimentIds={compareExperimentIds}
+              exampleIds={exampleIds}
+              onNextExample={(nextId) => {
+                setSelectedExampleId(nextId);
+                if (
+                  nextId === exampleIds[exampleIds.length - 1] &&
+                  !isLoadingNext &&
+                  hasNext
+                ) {
+                  loadNext(PAGE_SIZE);
+                }
+              }}
+              onPreviousExample={(previousId) =>
+                setSelectedExampleId(previousId)
+              }
+            />
+          )}
+        </Modal>
+      </ModalOverlay>
+      <ModalOverlay
         isOpen={!!dialog}
         onOpenChange={() => {
           // Clear the URL search params for the span selection
@@ -718,8 +681,7 @@ export function ExperimentCompareTable(props: ExampleCompareTableProps) {
         }}
       >
         <Modal variant="slideover" size="fullscreen">
-          {/* TODO: move this into the dialogs so the loading state is contained */}
-          <Suspense>{dialog}</Suspense>
+          {dialog}
         </Modal>
       </ModalOverlay>
     </View>
@@ -797,74 +759,6 @@ export const MemoizedTableBody = React.memo(
   (prev, next) => prev.table.options.data === next.table.options.data
 ) as typeof TableBody;
 
-enum ExperimentRowAction {
-  GO_TO_EXAMPLE = "gotoExample",
-}
-function ExperimentRowActionMenu(props: {
-  datasetId: string;
-  exampleId: string;
-}) {
-  const { datasetId, exampleId } = props;
-  const navigate = useNavigate();
-  return (
-    <div
-      // TODO: add this logic to the ActionMenu component
-      onClick={(e) => {
-        // prevent parent anchor link from being followed
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      <DialogTrigger>
-        <TooltipTrigger>
-          <Button
-            size="S"
-            leadingVisual={<Icon svg={<Icons.MoreHorizontalOutline />} />}
-          />
-          <Tooltip>
-            <TooltipArrow />
-            More actions
-          </Tooltip>
-        </TooltipTrigger>
-        <Popover>
-          <Dialog>
-            {({ close }) => (
-              <ListBox
-                style={{ minHeight: "auto" }}
-                onAction={(firedAction) => {
-                  const action = firedAction as ExperimentRowAction;
-                  switch (action) {
-                    case ExperimentRowAction.GO_TO_EXAMPLE: {
-                      navigate(`/datasets/${datasetId}/examples/${exampleId}`);
-                      break;
-                    }
-                    default: {
-                      assertUnreachable(action);
-                    }
-                  }
-                  close();
-                }}
-              >
-                <ListBoxItem id={ExperimentRowAction.GO_TO_EXAMPLE}>
-                  <Flex
-                    direction="row"
-                    gap="size-75"
-                    justifyContent="start"
-                    alignItems="center"
-                  >
-                    <Icon svg={<Icons.ExternalLinkOutline />} />
-                    <Text>Go to example</Text>
-                  </Flex>
-                </ListBoxItem>
-              </ListBox>
-            )}
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
-    </div>
-  );
-}
-
 function ExperimentMetadata(props: { experiment: Experiment }) {
   const { experiment } = props;
   const averageRunLatencyMs = experiment.averageRunLatencyMs;
@@ -879,7 +773,14 @@ function ExperimentMetadata(props: { experiment: Experiment }) {
       : tokenCountTotal / runCount;
   return (
     <Flex direction="row" gap="size-100" alignItems="center">
-      <Text size="S">avg:</Text>
+      <TooltipTrigger>
+        <TriggerWrap>
+          <Text size="S" fontFamily="mono" color="grey-500">
+            AVG
+          </Text>
+        </TriggerWrap>
+        <Tooltip>Averages computed over all runs in the experiment</Tooltip>
+      </TooltipTrigger>
       {averageRunLatencyMs != null && (
         <LatencyText size="S" latencyMs={averageRunLatencyMs} />
       )}
@@ -899,39 +800,15 @@ function ExperimentMetadata(props: { experiment: Experiment }) {
   );
 }
 
-function ExperimentRunMetadata(props: ExperimentRun) {
-  const { id, startTime, endTime, costSummary } = props;
-  const tokenCountTotal = costSummary.total.tokens;
-  const costTotal = costSummary.total.cost;
-  return (
-    <Flex direction="row" gap="size-100">
-      <RunLatency startTime={startTime} endTime={endTime} />
-      {tokenCountTotal != null && id ? (
-        <ExperimentRunTokenCount
-          tokenCountTotal={tokenCountTotal}
-          experimentRunId={id}
-          size="S"
-        />
-      ) : (
-        <TokenCount size="S">{tokenCountTotal}</TokenCount>
-      )}
-      {costTotal != null && id ? (
-        <ExperimentRunTokenCosts
-          costTotal={costTotal}
-          experimentRunId={id}
-          size="S"
-        />
-      ) : null}
-    </Flex>
-  );
-}
 /**
  * Display the output of an experiment run.
  */
 function ExperimentRunOutput(
   props: ExperimentRun & {
+    numRepetitions: number;
     displayFullText: boolean;
     setDialog: (dialog: ReactNode) => void;
+    annotationSummaries: readonly AnnotationSummary[];
   }
 ) {
   const { output, error, annotations, displayFullText, setDialog } = props;
@@ -955,6 +832,8 @@ function ExperimentRunOutput(
       </View>
       <ExperimentRunCellAnnotationsList
         annotations={annotationsList}
+        annotationSummaries={props.annotationSummaries}
+        numRepetitions={props.numRepetitions}
         onTraceClick={({ traceId, projectId, annotationName }) => {
           setDialog(
             <TraceDetailsDialog
@@ -978,34 +857,6 @@ function RunError({ error }: { error: string }) {
   );
 }
 
-function RunLatency({
-  startTime,
-  endTime,
-}: {
-  startTime: string;
-  endTime: string;
-}) {
-  const latencyMs = useMemo(() => {
-    let latencyMs: number | null = null;
-    if (startTime && endTime) {
-      latencyMs = new Date(endTime).getTime() - new Date(startTime).getTime();
-    }
-    return latencyMs;
-  }, [startTime, endTime]);
-  if (latencyMs === null) {
-    return null;
-  }
-  return <LatencyText size="S" latencyMs={latencyMs} />;
-}
-function NotRunText() {
-  return (
-    <Flex direction="row" gap="size-50">
-      <Icon svg={<Icons.MinusCircleOutline />} color="grey-800" />
-      <Text color="text-700">not run</Text>
-    </Flex>
-  );
-}
-
 function JSONCell<TData extends object, TValue>({
   getValue,
 }: CellContext<TData, TValue>) {
@@ -1021,196 +872,13 @@ function LargeTextWrap({ children }: { children: ReactNode }) {
   return (
     <div
       css={css`
-        max-height: 300px;
+        height: 300px;
         overflow-y: auto;
         flex: 1 1 auto;
       `}
     >
       {children}
     </div>
-  );
-}
-
-function SelectedExampleDialog({
-  selectedExample,
-  datasetId,
-  experimentInfoById,
-}: {
-  selectedExample: TableRow;
-  datasetId: string;
-  experimentInfoById: ExperimentInfoMap;
-}) {
-  return (
-    <Dialog>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{`Comparing Experiments for Example: ${selectedExample.id}`}</DialogTitle>
-          <DialogTitleExtra>
-            <ExperimentRowActionMenu
-              datasetId={datasetId}
-              exampleId={selectedExample.id}
-            />
-            <DialogCloseButton />
-          </DialogTitleExtra>
-        </DialogHeader>
-        <PanelGroup
-          direction="vertical"
-          autoSaveId="example-compare-panel-group"
-        >
-          <Panel defaultSize={35}>
-            <div
-              css={css`
-                overflow-y: auto;
-                height: 100%;
-              `}
-            >
-              <View overflow="hidden" padding="size-200">
-                <Flex direction="row" gap="size-200" flex="1 1 auto">
-                  <View width="50%">
-                    <Card
-                      title="Input"
-                      {...defaultCardProps}
-                      extra={
-                        <CopyToClipboardButton
-                          text={JSON.stringify(selectedExample.input)}
-                        />
-                      }
-                    >
-                      <View maxHeight="300px" overflow="auto">
-                        <JSONBlock
-                          value={JSON.stringify(selectedExample.input, null, 2)}
-                        />
-                      </View>
-                    </Card>
-                  </View>
-                  <View width="50%">
-                    <Card
-                      title="Reference Output"
-                      {...defaultCardProps}
-                      extra={
-                        <CopyToClipboardButton
-                          text={JSON.stringify(selectedExample.referenceOutput)}
-                        />
-                      }
-                    >
-                      <View maxHeight="300px" overflow="auto">
-                        <JSONBlock
-                          value={JSON.stringify(
-                            selectedExample.referenceOutput,
-                            null,
-                            2
-                          )}
-                        />
-                      </View>
-                    </Card>
-                  </View>
-                </Flex>
-              </View>
-            </div>
-          </Panel>
-          <PanelResizeHandle css={resizeHandleCSS} />
-          <Panel defaultSize={65}>
-            <Flex direction="column" height="100%">
-              <View
-                paddingStart="size-200"
-                paddingEnd="size-200"
-                paddingTop="size-100"
-                paddingBottom="size-100"
-                borderBottomColor="dark"
-                borderBottomWidth="thin"
-                flex="none"
-              >
-                <Heading level={2}>Experiments</Heading>
-              </View>
-              <div
-                css={css`
-                  overflow-y: auto;
-                  height: 100%;
-                  padding: var(--ac-global-dimension-static-size-200);
-                `}
-              >
-                <ul
-                  css={css`
-                    display: flex;
-                    flex-direction: column;
-                    gap: var(--ac-global-dimension-static-size-200);
-                  `}
-                >
-                  {selectedExample.runComparisonItems.map((runItem) => {
-                    const experiment = experimentInfoById[runItem.experimentId];
-                    return (
-                      <li key={runItem.experimentId}>
-                        <Card
-                          {...defaultCardProps}
-                          title={experiment?.name ?? ""}
-                          titleExtra={
-                            <SequenceNumberToken
-                              sequenceNumber={experiment?.sequenceNumber ?? 0}
-                            />
-                          }
-                        >
-                          <ul>
-                            {runItem.runs.map((run, index) => (
-                              <li key={index}>
-                                <Flex direction="row">
-                                  <View flex>
-                                    {run.error ? (
-                                      <View padding="size-200">
-                                        <RunError error={run.error} />
-                                      </View>
-                                    ) : (
-                                      <JSONBlock
-                                        value={JSON.stringify(
-                                          run.output,
-                                          null,
-                                          2
-                                        )}
-                                      />
-                                    )}
-                                  </View>
-                                  <ViewSummaryAside width="size-3000">
-                                    <RunLatency
-                                      startTime={run.startTime}
-                                      endTime={run.endTime}
-                                    />
-                                    <ul
-                                      css={css`
-                                        margin-top: var(
-                                          --ac-global-dimension-static-size-100
-                                        );
-                                        display: flex;
-                                        flex-direction: column;
-                                        justify-content: flex-start;
-                                        align-items: flex-end;
-                                        gap: var(
-                                          --ac-global-dimension-static-size-100
-                                        );
-                                      `}
-                                    >
-                                      {run.annotations?.edges.map((edge) => (
-                                        <li key={edge.annotation.id}>
-                                          <AnnotationLabel
-                                            annotation={edge.annotation}
-                                          />
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </ViewSummaryAside>
-                                </Flex>
-                              </li>
-                            ))}
-                          </ul>
-                        </Card>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            </Flex>
-          </Panel>
-        </PanelGroup>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -1257,10 +925,10 @@ function PaddedCell({ children }: { children: ReactNode }) {
   );
 }
 
-type ExperimentRunAnnotation =
-  ExperimentCompareTable_comparisons$data["compareExperiments"]["edges"][number]["comparison"]["runComparisonItems"][number]["runs"][number]["annotations"]["edges"][number]["annotation"];
 export type ExperimentRunCellAnnotationsListProps = {
   annotations: ExperimentRunAnnotation[];
+  annotationSummaries: readonly AnnotationSummary[];
+  numRepetitions: number;
   onTraceClick: ({
     annotationName,
     traceId,
@@ -1275,7 +943,17 @@ export type ExperimentRunCellAnnotationsListProps = {
 export function ExperimentRunCellAnnotationsList(
   props: ExperimentRunCellAnnotationsListProps
 ) {
-  const { annotations, onTraceClick } = props;
+  const { annotations, annotationSummaries, onTraceClick, numRepetitions } =
+    props;
+  const annotationSummaryByAnnotationName = useMemo(() => {
+    return annotationSummaries.reduce(
+      (acc, summary) => {
+        acc[summary.annotationName] = summary;
+        return acc;
+      },
+      {} as Record<string, AnnotationSummary>
+    );
+  }, [annotationSummaries]);
   return (
     <ul
       css={css`
@@ -1291,6 +969,8 @@ export function ExperimentRunCellAnnotationsList(
         const traceId = annotation.trace?.traceId;
         const projectId = annotation.trace?.projectId;
         const hasTrace = traceId != null && projectId != null;
+        const meanAnnotationScore =
+          annotationSummaryByAnnotationName[annotation.name]?.meanScore;
         return (
           <li
             key={annotation.id}
@@ -1303,27 +983,21 @@ export function ExperimentRunCellAnnotationsList(
             `}
           >
             <DialogTrigger>
-              <Pressable>
-                <button
-                  className="button--reset"
-                  css={css`
-                    cursor: pointer;
-                    padding: var(--ac-global-dimension-size-50)
-                      var(--ac-global-dimension-size-100);
-                    flex: 1 1 auto;
-                    border-radius: var(--ac-global-rounding-small);
-                    width: 100%;
-                    &:hover {
-                      background-color: var(--ac-global-color-grey-200);
-                    }
-                  `}
-                >
-                  <AnnotationNameAndValue
-                    annotation={annotation}
-                    displayPreference="score"
-                  />
-                </button>
-              </Pressable>
+              <ExperimentAnnotationButton
+                annotation={annotation}
+                extra={
+                  meanAnnotationScore != null && numRepetitions > 1 ? (
+                    <Flex direction="row" gap="size-100" alignItems="center">
+                      <Text fontFamily="mono">
+                        {floatFormatter(meanAnnotationScore)}
+                      </Text>
+                      <Text fontFamily="mono" color="grey-500">
+                        AVG
+                      </Text>
+                    </Flex>
+                  ) : null
+                }
+              />
               <Popover placement="top">
                 <PopoverArrow />
                 <Dialog style={{ width: 400 }}>
@@ -1368,5 +1042,122 @@ export function ExperimentRunCellAnnotationsList(
         );
       })}
     </ul>
+  );
+}
+
+function ExperimentRunOutputCell({
+  experimentRepetitionCount,
+  repeatedRunGroup,
+  displayFullText,
+  setDialog,
+  setSelectedExampleId,
+  tableRow,
+  annotationSummaries,
+}: {
+  experimentRepetitionCount: number;
+  repeatedRunGroup: ExperimentRepeatedRunGroup;
+  displayFullText: boolean;
+  setDialog: (dialog: ReactNode) => void;
+  setSelectedExampleId: (id: string) => void;
+  tableRow: TableRow;
+  annotationSummaries: readonly AnnotationSummary[];
+}) {
+  const [selectedRepetitionNumber, setSelectedRepetitionNumber] = useState(1);
+
+  const runsByRepetitionNumber = useMemo(() => {
+    const runsByRepetitionNumber = repeatedRunGroup.runs.reduce(
+      (acc, run) => {
+        acc[run.repetitionNumber] = run;
+        return acc;
+      },
+      {} as Record<number, ExperimentRun>
+    );
+    return runsByRepetitionNumber;
+  }, [repeatedRunGroup.runs]);
+
+  if (repeatedRunGroup.runs.length === 0) {
+    return (
+      <PaddedCell>
+        <Empty message="No Run" />
+      </PaddedCell>
+    );
+  }
+
+  const run: ExperimentRun | null =
+    runsByRepetitionNumber[selectedRepetitionNumber];
+
+  const traceId = run?.trace?.traceId;
+  const projectId = run?.trace?.projectId;
+  const hasTrace = traceId != null && projectId != null;
+  const runControls = (
+    <>
+      {experimentRepetitionCount > 1 ? (
+        <ExperimentRepetitionSelector
+          repetitionNumber={selectedRepetitionNumber}
+          totalRepetitions={experimentRepetitionCount}
+          setRepetitionNumber={setSelectedRepetitionNumber}
+        />
+      ) : null}
+      <TooltipTrigger>
+        <IconButton
+          className="expand-button"
+          size="S"
+          aria-label="View example run details"
+          onPress={() => {
+            setSelectedExampleId(tableRow.id);
+          }}
+        >
+          <Icon svg={<Icons.ExpandOutline />} />
+        </IconButton>
+        <Tooltip>
+          <TooltipArrow />
+          view experiment run
+        </Tooltip>
+      </TooltipTrigger>
+      <TooltipTrigger isDisabled={!hasTrace}>
+        <IconButton
+          className="trace-button"
+          size="S"
+          aria-label="View run trace"
+          onPress={() => {
+            setDialog(
+              <TraceDetailsDialog
+                traceId={traceId || ""}
+                projectId={projectId || ""}
+                title={`Experiment Run Trace`}
+              />
+            );
+          }}
+          isDisabled={!hasTrace}
+        >
+          <Icon svg={<Icons.Trace />} />
+        </IconButton>
+        <Tooltip>
+          <TooltipArrow />
+          view run trace
+        </Tooltip>
+      </TooltipTrigger>
+    </>
+  );
+
+  return (
+    <Flex direction="column" height="100%">
+      <CellTop extra={runControls}>
+        <ExperimentRepeatedRunGroupMetadata fragmentRef={repeatedRunGroup} />
+      </CellTop>
+      {run ? (
+        <ExperimentRunOutput
+          {...run}
+          numRepetitions={experimentRepetitionCount}
+          displayFullText={displayFullText}
+          setDialog={setDialog}
+          annotationSummaries={annotationSummaries}
+        />
+      ) : (
+        <PaddedCell>
+          <Empty message="Missing Repetition" />
+        </PaddedCell>
+      )}
+    </Flex>
   );
 }

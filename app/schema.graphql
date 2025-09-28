@@ -200,6 +200,7 @@ input ChatCompletionInput {
   credentials: [GenerativeCredentialInput!]
   template: PromptTemplateOptions
   promptName: Identifier = null
+  repetitions: Int!
 }
 
 input ChatCompletionMessageInput {
@@ -244,6 +245,7 @@ input ChatCompletionOverDatasetInput {
   tools: [JSON!]
   credentials: [GenerativeCredentialInput!]
   templateFormat: PromptTemplateFormat! = MUSTACHE
+  repetitions: Int!
   datasetId: ID!
   datasetVersionId: ID = null
   experimentName: String = null
@@ -254,6 +256,7 @@ input ChatCompletionOverDatasetInput {
 
 type ChatCompletionOverDatasetMutationExamplePayload {
   datasetExampleId: ID!
+  repetitionNumber: Int!
   experimentRunId: ID!
   result: ChatCompletionMutationPayloadChatCompletionMutationError!
 }
@@ -267,20 +270,24 @@ type ChatCompletionOverDatasetMutationPayload {
 
 type ChatCompletionSubscriptionError implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   message: String!
 }
 
 type ChatCompletionSubscriptionExperiment implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   experiment: Experiment!
 }
 
 interface ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
 }
 
 type ChatCompletionSubscriptionResult implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   span: Span
   experimentRun: ExperimentRun
 }
@@ -439,8 +446,9 @@ input CreateProjectTraceRetentionPolicyInput {
 }
 
 input CreatePromptLabelInput {
-  name: Identifier!
+  name: String!
   description: String = null
+  color: String!
 }
 
 input CreateSpanAnnotationInput {
@@ -546,7 +554,7 @@ type Dataset implements Node {
   """
   experimentCount(datasetVersionId: ID): Int!
   experiments(first: Int = 50, last: Int, after: String, before: String, filterCondition: String, filterIds: [ID!]): ExperimentConnection!
-  experimentAnnotationSummaries: [ExperimentAnnotationSummary!]!
+  experimentAnnotationSummaries: [DatasetExperimentAnnotationSummary!]!
   lastUpdatedAt: DateTime
 }
 
@@ -579,7 +587,8 @@ type DatasetExample implements Node {
   createdAt: DateTime!
   revision(datasetVersionId: ID): DatasetExampleRevision!
   span: Span
-  experimentRuns(first: Int = 50, last: Int, after: String, before: String): ExperimentRunConnection!
+  experimentRuns(first: Int = 50, last: Int, after: String, before: String, experimentIds: [ID!]): ExperimentRunConnection!
+  experimentRepeatedRunGroups(experimentIds: [ID!]!): [ExperimentRepeatedRunGroup!]!
 }
 
 """A connection to a list of items."""
@@ -620,6 +629,12 @@ type DatasetExampleRevision implements ExampleRevision {
   metadata: JSON!
   revisionKind: RevisionKind!
   createdAt: DateTime!
+}
+
+type DatasetExperimentAnnotationSummary {
+  annotationName: String!
+  minScore: Float
+  maxScore: Float
 }
 
 """A filter for datasets"""
@@ -744,8 +759,8 @@ input DeletePromptInput {
   promptId: ID!
 }
 
-input DeletePromptLabelInput {
-  promptLabelId: ID!
+input DeletePromptLabelsInput {
+  promptLabelIds: [ID!]!
 }
 
 type DeletePromptMutationPayload {
@@ -867,7 +882,10 @@ type DimensionWithValue {
   value: String
 }
 
-type DocumentAnnotation implements Annotation {
+type DocumentAnnotation implements Node & Annotation {
+  """The Globally Unique ID of this object"""
+  id: ID!
+
   """Name of the annotation, e.g. 'helpfulness' or 'relevance'."""
   name: String!
 
@@ -889,11 +907,13 @@ type DocumentAnnotation implements Annotation {
 
   """The date and time when the annotation was last updated."""
   updatedAt: DateTime!
-
-  """
-  The zero-based index among retrieved documents, which is collected as a list (even when ordering is not inherently meaningful).
-  """
+  annotatorKind: AnnotatorKind!
+  metadata: JSON!
   documentPosition: Int!
+  identifier: String!
+  source: AnnotationSource!
+  span: Span!
+  user: User
 }
 
 """
@@ -1071,6 +1091,8 @@ type Experiment implements Node {
   name: String!
   projectName: String
   description: String
+  repetitions: Int!
+  datasetVersionId: ID!
   metadata: JSON!
   createdAt: DateTime!
   updatedAt: DateTime!
@@ -1101,7 +1123,7 @@ type ExperimentComparison implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
   example: DatasetExample!
-  runComparisonItems: [RunComparisonItem!]!
+  repeatedRunGroups: [ExperimentRepeatedRunGroup!]!
 }
 
 """A connection to a list of items."""
@@ -1144,15 +1166,33 @@ type ExperimentMutationPayload {
   experiments: [Experiment!]!
 }
 
+type ExperimentRepeatedRunGroup implements Node {
+  """The Globally Unique ID of this object"""
+  id: ID!
+  runs: [ExperimentRun!]!
+  experimentId: ID!
+  averageLatencyMs: Float
+  costSummary: SpanCostSummary!
+  costDetailSummaryEntries: [SpanCostDetailSummaryEntry!]!
+  annotationSummaries: [ExperimentRepeatedRunGroupAnnotationSummary!]!
+}
+
+type ExperimentRepeatedRunGroupAnnotationSummary {
+  annotationName: String!
+  meanScore: Float
+}
+
 type ExperimentRun implements Node {
   """The Globally Unique ID of this object"""
   id: ID!
   experimentId: ID!
+  repetitionNumber: Int!
   traceId: String
   output: JSON
   startTime: DateTime!
   endTime: DateTime!
   error: String
+  latencyMs: Float!
   annotations(first: Int = 50, last: Int, after: String, before: String): ExperimentRunAnnotationConnection!
   trace: Trace
   example: DatasetExample!
@@ -1279,6 +1319,7 @@ input FreeformAnnotationConfigInput {
 
 type FunctionCallChunk implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   name: String!
   arguments: String!
 }
@@ -1317,6 +1358,7 @@ input GenerativeModelInput {
   endpoint: String
   apiVersion: String
   region: String
+  customHeaders: JSON
 }
 
 enum GenerativeModelKind {
@@ -1572,9 +1614,9 @@ type Mutation {
   setPromptVersionTag(input: SetPromptVersionTagInput!): PromptVersionTagMutationPayload!
   createPromptLabel(input: CreatePromptLabelInput!): PromptLabelMutationPayload!
   patchPromptLabel(input: PatchPromptLabelInput!): PromptLabelMutationPayload!
-  deletePromptLabel(input: DeletePromptLabelInput!): PromptLabelMutationPayload!
-  setPromptLabel(input: SetPromptLabelInput!): PromptLabelMutationPayload!
-  unsetPromptLabel(input: UnsetPromptLabelInput!): PromptLabelMutationPayload!
+  deletePromptLabels(input: DeletePromptLabelsInput!): PromptLabelDeleteMutationPayload!
+  setPromptLabels(input: SetPromptLabelsInput!): PromptLabelAssociationMutationPayload!
+  unsetPromptLabels(input: UnsetPromptLabelsInput!): PromptLabelAssociationMutationPayload!
   createSpanAnnotations(input: [CreateSpanAnnotationInput!]!): SpanAnnotationMutationPayload!
   createSpanNote(annotationInput: CreateSpanNoteInput!): SpanAnnotationMutationPayload!
   patchSpanAnnotations(input: [PatchAnnotationInput!]!): SpanAnnotationMutationPayload!
@@ -1667,7 +1709,7 @@ input PatchPromptInput {
 
 input PatchPromptLabelInput {
   promptLabelId: ID!
-  name: Identifier = null
+  name: String = null
   description: String = null
 }
 
@@ -1922,6 +1964,7 @@ type Prompt implements Node {
   versionTags: [PromptVersionTag!]!
   promptVersions(first: Int = 50, last: Int, after: String, before: String): PromptVersionConnection!
   sourcePrompt: Prompt
+  labels: [PromptLabel!]!
 }
 
 type PromptChatTemplate {
@@ -1965,7 +2008,11 @@ type PromptLabel implements Node {
   id: ID!
   name: Identifier!
   description: String
-  prompts: [Prompt!]!
+  color: String!
+}
+
+type PromptLabelAssociationMutationPayload {
+  query: Query!
 }
 
 """A connection to a list of items."""
@@ -1975,6 +2022,11 @@ type PromptLabelConnection {
 
   """Contains the nodes in this connection"""
   edges: [PromptLabelEdge!]!
+}
+
+type PromptLabelDeleteMutationPayload {
+  deletedPromptLabelIds: [ID!]!
+  query: Query!
 }
 
 """An edge in a connection."""
@@ -1987,7 +2039,7 @@ type PromptLabelEdge {
 }
 
 type PromptLabelMutationPayload {
-  promptLabel: PromptLabel
+  promptLabels: [PromptLabel!]!
   query: Query!
 }
 
@@ -2183,11 +2235,6 @@ enum RevisionKind {
   DELETE
 }
 
-type RunComparisonItem {
-  experimentId: ID!
-  runs: [ExperimentRun!]!
-}
-
 enum ScalarDriftMetric {
   psi
   klDivergence
@@ -2208,9 +2255,9 @@ type ServerStatus {
   insufficientStorage: Boolean!
 }
 
-input SetPromptLabelInput {
+input SetPromptLabelsInput {
   promptId: ID!
-  promptLabelId: ID!
+  promptLabelIds: [ID!]!
 }
 
 input SetPromptVersionTagInput {
@@ -2550,6 +2597,7 @@ type SystemApiKey implements ApiKey & Node {
 
 type TextChunk implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   content: String!
 }
 
@@ -2631,6 +2679,7 @@ type TokenUsage {
 
 type ToolCallChunk implements ChatCompletionSubscriptionPayload {
   datasetExampleId: ID
+  repetitionNumber: Int
   id: String!
   function: FunctionCallChunk!
 }
@@ -2714,7 +2763,7 @@ type TraceAnnotation implements Node {
   metadata: JSON!
   identifier: String!
   source: AnnotationSource!
-  traceId: ID!
+  trace: Trace!
   user: User
 }
 
@@ -2837,9 +2886,9 @@ type UMAPPoints {
   contextRetrievals: [Retrieval!]!
 }
 
-input UnsetPromptLabelInput {
+input UnsetPromptLabelsInput {
   promptId: ID!
-  promptLabelId: ID!
+  promptLabelIds: [ID!]!
 }
 
 input UpdateAnnotationConfigInput {

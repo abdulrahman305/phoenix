@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Annotated, Optional
 
 import strawberry
 from sqlalchemy import func, select
-from sqlalchemy.orm import load_only
 from sqlalchemy.sql.functions import coalesce
 from strawberry import UNSET
 from strawberry.relay import Connection, GlobalID, Node, NodeID
@@ -34,11 +33,16 @@ if TYPE_CHECKING:
 class ExperimentRun(Node):
     id_attr: NodeID[int]
     experiment_id: GlobalID
+    repetition_number: int
     trace_id: Optional[str]
     output: Optional[JSON]
     start_time: datetime
     end_time: datetime
     error: Optional[str]
+
+    @strawberry.field
+    def latency_ms(self) -> float:
+        return (self.end_time - self.start_time).total_seconds() * 1000
 
     @strawberry.field
     async def annotations(
@@ -78,24 +82,12 @@ class ExperimentRun(Node):
     ]:  # use lazy types to avoid circular import: https://strawberry.rocks/docs/types/lazy
         from phoenix.server.api.types.DatasetExample import DatasetExample
 
-        async with info.context.db() as session:
-            assert (
-                result := await session.execute(
-                    select(models.DatasetExample, models.Experiment.dataset_version_id)
-                    .select_from(models.ExperimentRun)
-                    .join(
-                        models.DatasetExample,
-                        models.DatasetExample.id == models.ExperimentRun.dataset_example_id,
-                    )
-                    .join(
-                        models.Experiment,
-                        models.Experiment.id == models.ExperimentRun.experiment_id,
-                    )
-                    .where(models.ExperimentRun.id == self.id_attr)
-                    .options(load_only(models.DatasetExample.id, models.DatasetExample.created_at))
-                )
-            ) is not None
-            example, version_id = result.first()
+        (
+            example,
+            version_id,
+        ) = await info.context.data_loaders.dataset_examples_and_versions_by_experiment_run.load(
+            self.id_attr
+        )
         return DatasetExample(
             id_attr=example.id,
             created_at=example.created_at,
@@ -165,6 +157,7 @@ def to_gql_experiment_run(run: models.ExperimentRun) -> ExperimentRun:
     return ExperimentRun(
         id_attr=run.id,
         experiment_id=GlobalID(Experiment.__name__, str(run.experiment_id)),
+        repetition_number=run.repetition_number,
         trace_id=run.trace.trace_id if run.trace else None,
         output=run.output.get("task_output"),
         start_time=run.start_time,

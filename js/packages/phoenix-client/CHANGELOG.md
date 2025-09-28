@@ -1,5 +1,36 @@
 # @arizeai/phoenix-client
 
+## 4.0.3
+
+### Patch Changes
+
+- e3a8ce2: pass through the tracer provider to experiments so that there is no need to configure it twice
+- c85780b: Add support for generics across evals and experiments
+
+## 4.0.2
+
+### Patch Changes
+
+- 1b71c66: make sure repetion numbers are greater than 0
+
+## 4.0.1
+
+### Patch Changes
+
+- e72a9ad: don't swallow errors, allow for incomplete datasets (e.g. just imputs)
+
+## 4.0.0
+
+### Major Changes
+
+- 7732f99: Breaking change for AI SDK users. Support for messages conversion for the AI SDK 5
+
+## 3.2.0
+
+### Minor Changes
+
+- 4f43901: add support for logging document annotations
+
 ## 3.1.0
 
 ### Minor Changes

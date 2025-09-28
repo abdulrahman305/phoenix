@@ -1040,6 +1040,16 @@ export const derivedCSS = (theme: ThemeContextType["theme"]) => css`
     );
     --ac-global-button-success-border-color: var(--ac-global-color-success);
 
+    // Styles for checkbox
+    --ac-global-checkbox-selected-color: var(--ac-global-color-grey-800);
+    --ac-global-checkbox-selected-color-pressed: var(
+      --ac-global-color-grey-900
+    );
+    --ac-global-checkbox-checkmark-color: var(--ac-global-color-grey-50);
+    --ac-global-checkbox-border-color: var(--ac-global-color-grey-300);
+    --ac-global-checkbox-border-color-pressed: var(--ac-global-color-grey-400);
+    --ac-global-checkbox-border-color-hover: var(--ac-global-color-grey-400);
+
     // Styles for disclosure
     --ac-global-disclosure-background-color-active: rgba(
       var(--ac-global-color-grey-900-rgb),
@@ -1255,17 +1265,6 @@ const codeMirrorOverridesCSS = css`
   }
 `;
 
-const ReactGridLayoutCSS = css`
-  .react-grid-item.react-grid-placeholder {
-    // the placeholder doesn't look good
-    background: var(--ac-global-color-blue-500);
-    opacity: 0.1;
-  }
-  .ac-theme--dark .react-resizable-handle {
-    filter: invert(1);
-  }
-`;
-
 const chartCSS = css`
   .ac-theme {
     --chart-cartesian-grid-stroke-color: var(--ac-global-color-grey-300);
@@ -1308,7 +1307,6 @@ export function GlobalStyles() {
         opacitiesCSS,
         appGlobalStylesCSS,
         codeMirrorOverridesCSS,
-        ReactGridLayoutCSS,
         chartCSS,
         fontFamilyCSS
       )}

@@ -27,7 +27,7 @@ class Client:
         Args:
             base_url (Optional[str | httpx.URL]): The base URL for the API endpoint.
                 If not provided, it will be read from the environment variables or
-                fall back to http://localhost:6006/.
+                fall back to http://localhost:6006.
             api_key (Optional[str]): The API key for authentication. If provided, it
                 will be included in the Authorization header as a bearer token.
             headers (Optional[Mapping[str, str]]): Additional headers to be included
@@ -58,7 +58,7 @@ class Client:
         self._prompts = Prompts(value)
         self._projects = Projects(value)
         self._spans = Spans(value)
-        self._annotations = Annotations(value)
+        self._annotations = Annotations(self._spans)  # deprecated
         self._datasets = Datasets(value)
         self._experiments = Experiments(value)
 
@@ -131,7 +131,7 @@ class AsyncClient:
         Args:
             base_url (Optional[str | httpx.URL]): The base URL for the API endpoint.
                 If not provided, it will be read from the environment variables or
-                fall back to http://localhost:6006/.
+                fall back to http://localhost:6006.
             api_key (Optional[str]): The API key for authentication. If provided, it
                 will be included in the Authorization header as a bearer token.
             headers (Optional[Mapping[str, str]]): Additional headers to be included
@@ -160,13 +160,14 @@ class AsyncClient:
         self._prompts = AsyncPrompts(value)
         self._projects = AsyncProjects(value)
         self._spans = AsyncSpans(value)
-        self._annotations = AsyncAnnotations(value)
+        self._annotations = AsyncAnnotations(self._spans)  # deprecated
         self._datasets = AsyncDatasets(value)
         self._experiments = AsyncExperiments(value)
 
     @property
     def prompts(self) -> AsyncPrompts:
-        """Returns an instance of the AsyncPrompts class for interacting with prompt-related API endpoints.
+        """
+        Returns an instance of the AsyncPrompts class for interacting with prompt-related API endpoints.
 
         Returns:
             AsyncPrompts: An instance of the AsyncPrompts class.

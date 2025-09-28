@@ -1,7 +1,6 @@
 import gzip
 import zlib
-from datetime import datetime, timezone
-from typing import Any, Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, Query
 from google.protobuf.message import DecodeError
@@ -10,7 +9,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceResponse,
 )
 from pydantic import Field
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, select
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import State
 from starlette.requests import Request
@@ -19,28 +18,44 @@ from starlette.status import (
     HTTP_404_NOT_FOUND,
     HTTP_415_UNSUPPORTED_MEDIA_TYPE,
     HTTP_422_UNPROCESSABLE_ENTITY,
+    HTTP_503_SERVICE_UNAVAILABLE,
 )
 from strawberry.relay import GlobalID
 
 from phoenix.db import models
-from phoenix.db.insertion.helpers import as_kv
-from phoenix.db.insertion.types import Precursors
+from phoenix.db.helpers import SupportedSQLDialect
+from phoenix.db.insertion.helpers import as_kv, insert_on_conflict
+from phoenix.server.api.routers.v1.annotations import TraceAnnotationData
 from phoenix.server.api.types.node import from_global_id_with_expected_type
 from phoenix.server.authorization import is_not_locked
 from phoenix.server.bearer_auth import PhoenixUser
 from phoenix.server.dml_event import SpanDeleteEvent, TraceAnnotationInsertEvent
+from phoenix.server.prometheus import SPAN_QUEUE_REJECTIONS
 from phoenix.trace.otel import decode_otlp_span
 from phoenix.utilities.project import get_project_name
 
 from .models import V1RoutesBaseModel
-from .utils import RequestBody, ResponseBody, add_errors_to_responses
+from .utils import (
+    RequestBody,
+    ResponseBody,
+    add_errors_to_responses,
+)
 
 router = APIRouter(tags=["traces"])
 
 
+def is_not_at_capacity(request: Request) -> None:
+    if request.app.state.span_queue_is_full():
+        SPAN_QUEUE_REJECTIONS.inc()
+        raise HTTPException(
+            detail="Server is at capacity and cannot process more requests",
+            status_code=HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
 @router.post(
     "/traces",
-    dependencies=[Depends(is_not_locked)],
+    dependencies=[Depends(is_not_locked), Depends(is_not_at_capacity)],
     operation_id="addTraces",
     summary="Send traces",
     responses=add_errors_to_responses(
@@ -52,6 +67,10 @@ router = APIRouter(tags=["traces"])
                 ),
             },
             {"status_code": HTTP_422_UNPROCESSABLE_ENTITY, "description": "Invalid request body"},
+            {
+                "status_code": HTTP_503_SERVICE_UNAVAILABLE,
+                "description": "Server is at capacity and cannot process more requests",
+            },
         ]
     ),
     openapi_extra={
@@ -105,54 +124,8 @@ async def post_traces(
     )
 
 
-class TraceAnnotationResult(V1RoutesBaseModel):
-    label: Optional[str] = Field(default=None, description="The label assigned by the annotation")
-    score: Optional[float] = Field(default=None, description="The score assigned by the annotation")
-    explanation: Optional[str] = Field(
-        default=None, description="Explanation of the annotation result"
-    )
-
-
-class TraceAnnotation(V1RoutesBaseModel):
-    trace_id: str = Field(description="OpenTelemetry Trace ID (hex format w/o 0x prefix)")
-    name: str = Field(description="The name of the annotation")
-    annotator_kind: Literal["LLM", "HUMAN"] = Field(
-        description="The kind of annotator used for the annotation"
-    )
-    result: Optional[TraceAnnotationResult] = Field(
-        default=None, description="The result of the annotation"
-    )
-    metadata: Optional[dict[str, Any]] = Field(
-        default=None, description="Metadata for the annotation"
-    )
-    identifier: str = Field(
-        default="",
-        description=(
-            "The identifier of the annotation. "
-            "If provided, the annotation will be updated if it already exists."
-        ),
-    )
-
-    def as_precursor(self, *, user_id: Optional[int] = None) -> Precursors.TraceAnnotation:
-        return Precursors.TraceAnnotation(
-            datetime.now(timezone.utc),
-            self.trace_id,
-            models.TraceAnnotation(
-                name=self.name,
-                annotator_kind=self.annotator_kind,
-                score=self.result.score if self.result else None,
-                label=self.result.label if self.result else None,
-                explanation=self.result.explanation if self.result else None,
-                metadata_=self.metadata or {},
-                identifier=self.identifier,
-                source="APP",
-                user_id=user_id,
-            ),
-        )
-
-
-class AnnotateTracesRequestBody(RequestBody[list[TraceAnnotation]]):
-    data: list[TraceAnnotation] = Field(description="The trace annotations to be upserted")
+class AnnotateTracesRequestBody(RequestBody[list[TraceAnnotationData]]):
+    data: list[TraceAnnotationData] = Field(description="The trace annotations to be upserted")
 
 
 class InsertedTraceAnnotation(V1RoutesBaseModel):
@@ -187,7 +160,7 @@ async def annotate_traces(
 
     precursors = [d.as_precursor(user_id=user_id) for d in request_body.data]
     if not sync:
-        await request.state.enqueue(*precursors)
+        await request.state.enqueue_annotations(*precursors)
         return AnnotateTracesResponseBody(data=[])
 
     trace_ids = {p.trace_id for p in precursors}
@@ -208,10 +181,16 @@ async def annotate_traces(
                 status_code=HTTP_404_NOT_FOUND,
             )
         inserted_ids = []
+        dialect = SupportedSQLDialect(session.bind.dialect.name)
         for p in precursors:
             values = dict(as_kv(p.as_insertable(existing_traces[p.trace_id]).row))
             trace_annotation_id = await session.scalar(
-                insert(models.TraceAnnotation).values(**values).returning(models.TraceAnnotation.id)
+                insert_on_conflict(
+                    values,
+                    dialect=dialect,
+                    table=models.TraceAnnotation,
+                    unique_by=("name", "trace_rowid", "identifier"),
+                ).returning(models.TraceAnnotation.id)
             )
             inserted_ids.append(trace_annotation_id)
     request.state.event_queue.put(TraceAnnotationInsertEvent(tuple(inserted_ids)))
@@ -229,7 +208,7 @@ async def _add_spans(req: ExportTraceServiceRequest, state: State) -> None:
         for scope_span in resource_spans.scope_spans:
             for otlp_span in scope_span.spans:
                 span = await run_in_threadpool(decode_otlp_span, otlp_span)
-                await state.queue_span_for_bulk_insert(span, project_name)
+                await state.enqueue_span(span, project_name)
 
 
 @router.delete(

@@ -21,6 +21,13 @@ const listBoxCSS = css`
     outline-offset: -1px;
   }
 
+  &[data-empty] {
+    align-items: center;
+    justify-content: center;
+    font-style: italic;
+    color: var(--ac-global-text-color-700);
+  }
+
   .react-aria-ListBoxItem {
     margin: var(--ac-global-dimension-size-25);
     padding: var(--ac-global-dimension-size-100)
@@ -30,6 +37,7 @@ const listBoxCSS = css`
     cursor: default;
     color: var(--ac-global-text-color-900);
     font-size: var(--ac-global-font-size-s);
+    line-height: var(--ac-global-line-height-s);
 
     position: relative;
     display: flex;

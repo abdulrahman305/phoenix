@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<05d4d5f8462775a4d5150883e5aeeb32>>
+ * @generated SignedSource<<4114ce472c9772af4da56acafc7a797c>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -49,6 +49,7 @@ export type ExperimentsTableFragment$data = {
         readonly project: {
           readonly id: string;
         } | null;
+        readonly repetitions: number;
         readonly runCount: number;
         readonly sequenceNumber: number;
       };
@@ -146,7 +147,7 @@ return {
     {
       "alias": null,
       "args": null,
-      "concreteType": "ExperimentAnnotationSummary",
+      "concreteType": "DatasetExperimentAnnotationSummary",
       "kind": "LinkedField",
       "name": "experimentAnnotationSummaries",
       "plural": true,
@@ -241,6 +242,13 @@ return {
                   "args": null,
                   "kind": "ScalarField",
                   "name": "runCount",
+                  "storageKey": null
+                },
+                {
+                  "alias": null,
+                  "args": null,
+                  "kind": "ScalarField",
+                  "name": "repetitions",
                   "storageKey": null
                 },
                 {
@@ -401,6 +409,6 @@ return {
 };
 })();
 
-(node as any).hash = "357028b833d3db5992481041ea2bc922";
+(node as any).hash = "17186b0bb426f1417580336d6143d8a3";
 
 export default node;
