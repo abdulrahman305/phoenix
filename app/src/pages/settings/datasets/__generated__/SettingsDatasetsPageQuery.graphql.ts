@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<275f7645a73151e39d530b4f1e95d9b6>>
+ * @generated SignedSource<<9495fa6128f97a99735e3e5d3c3ddca1>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -10,13 +10,13 @@
 
 import { ConcreteRequest } from 'relay-runtime';
 import { FragmentRefs } from "relay-runtime";
-export type DatasetsPageQuery$variables = Record<PropertyKey, never>;
-export type DatasetsPageQuery$data = {
-  readonly " $fragmentSpreads": FragmentRefs<"DatasetsTable_datasets">;
+export type SettingsDatasetsPageQuery$variables = Record<PropertyKey, never>;
+export type SettingsDatasetsPageQuery$data = {
+  readonly " $fragmentSpreads": FragmentRefs<"DatasetLabelsSettingsCardFragment">;
 };
-export type DatasetsPageQuery = {
-  response: DatasetsPageQuery$data;
-  variables: DatasetsPageQuery$variables;
+export type SettingsDatasetsPageQuery = {
+  response: SettingsDatasetsPageQuery$data;
+  variables: SettingsDatasetsPageQuery$variables;
 };
 
 const node: ConcreteRequest = (function(){
@@ -25,41 +25,19 @@ var v0 = [
     "kind": "Literal",
     "name": "first",
     "value": 100
-  },
-  {
-    "kind": "Literal",
-    "name": "sort",
-    "value": {
-      "col": "createdAt",
-      "dir": "desc"
-    }
   }
-],
-v1 = {
-  "alias": null,
-  "args": null,
-  "kind": "ScalarField",
-  "name": "id",
-  "storageKey": null
-},
-v2 = {
-  "alias": null,
-  "args": null,
-  "kind": "ScalarField",
-  "name": "name",
-  "storageKey": null
-};
+];
 return {
   "fragment": {
     "argumentDefinitions": [],
     "kind": "Fragment",
     "metadata": null,
-    "name": "DatasetsPageQuery",
+    "name": "SettingsDatasetsPageQuery",
     "selections": [
       {
         "args": null,
         "kind": "FragmentSpread",
-        "name": "DatasetsTable_datasets"
+        "name": "DatasetLabelsSettingsCardFragment"
       }
     ],
     "type": "Query",
@@ -69,20 +47,20 @@ return {
   "operation": {
     "argumentDefinitions": [],
     "kind": "Operation",
-    "name": "DatasetsPageQuery",
+    "name": "SettingsDatasetsPageQuery",
     "selections": [
       {
         "alias": null,
         "args": (v0/*: any*/),
-        "concreteType": "DatasetConnection",
+        "concreteType": "DatasetLabelConnection",
         "kind": "LinkedField",
-        "name": "datasets",
+        "name": "datasetLabels",
         "plural": false,
         "selections": [
           {
             "alias": null,
             "args": null,
-            "concreteType": "DatasetEdge",
+            "concreteType": "DatasetLabelEdge",
             "kind": "LinkedField",
             "name": "edges",
             "plural": true,
@@ -90,13 +68,25 @@ return {
               {
                 "alias": null,
                 "args": null,
-                "concreteType": "Dataset",
+                "concreteType": "DatasetLabel",
                 "kind": "LinkedField",
                 "name": "node",
                 "plural": false,
                 "selections": [
-                  (v1/*: any*/),
-                  (v2/*: any*/),
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "id",
+                    "storageKey": null
+                  },
+                  {
+                    "alias": null,
+                    "args": null,
+                    "kind": "ScalarField",
+                    "name": "name",
+                    "storageKey": null
+                  },
                   {
                     "alias": null,
                     "args": null,
@@ -108,48 +98,7 @@ return {
                     "alias": null,
                     "args": null,
                     "kind": "ScalarField",
-                    "name": "metadata",
-                    "storageKey": null
-                  },
-                  {
-                    "alias": null,
-                    "args": null,
-                    "kind": "ScalarField",
-                    "name": "createdAt",
-                    "storageKey": null
-                  },
-                  {
-                    "alias": null,
-                    "args": null,
-                    "kind": "ScalarField",
-                    "name": "exampleCount",
-                    "storageKey": null
-                  },
-                  {
-                    "alias": null,
-                    "args": null,
-                    "kind": "ScalarField",
-                    "name": "experimentCount",
-                    "storageKey": null
-                  },
-                  {
-                    "alias": null,
-                    "args": null,
-                    "concreteType": "DatasetLabel",
-                    "kind": "LinkedField",
-                    "name": "labels",
-                    "plural": true,
-                    "selections": [
-                      (v1/*: any*/),
-                      (v2/*: any*/),
-                      {
-                        "alias": null,
-                        "args": null,
-                        "kind": "ScalarField",
-                        "name": "color",
-                        "storageKey": null
-                      }
-                    ],
+                    "name": "color",
                     "storageKey": null
                   },
                   {
@@ -198,33 +147,30 @@ return {
             "storageKey": null
           }
         ],
-        "storageKey": "datasets(first:100,sort:{\"col\":\"createdAt\",\"dir\":\"desc\"})"
+        "storageKey": "datasetLabels(first:100)"
       },
       {
         "alias": null,
         "args": (v0/*: any*/),
-        "filters": [
-          "sort",
-          "filter"
-        ],
+        "filters": null,
         "handle": "connection",
-        "key": "DatasetsTable_datasets",
+        "key": "DatasetLabelsTable__datasetLabels",
         "kind": "LinkedHandle",
-        "name": "datasets"
+        "name": "datasetLabels"
       }
     ]
   },
   "params": {
-    "cacheID": "0bdf83ff96fd6bfc2dc513d5edbadc31",
+    "cacheID": "d644286d0a3b1a6e827bb334d3435e5f",
     "id": null,
     "metadata": {},
-    "name": "DatasetsPageQuery",
+    "name": "SettingsDatasetsPageQuery",
     "operationKind": "query",
-    "text": "query DatasetsPageQuery {\n  ...DatasetsTable_datasets\n}\n\nfragment DatasetsTable_datasets on Query {\n  datasets(first: 100, sort: {col: createdAt, dir: desc}) {\n    edges {\n      node {\n        id\n        name\n        description\n        metadata\n        createdAt\n        exampleCount\n        experimentCount\n        labels {\n          id\n          name\n          color\n        }\n        __typename\n      }\n      cursor\n    }\n    pageInfo {\n      endCursor\n      hasNextPage\n    }\n  }\n}\n"
+    "text": "query SettingsDatasetsPageQuery {\n  ...DatasetLabelsSettingsCardFragment\n}\n\nfragment DatasetLabelsSettingsCardFragment on Query {\n  ...DatasetLabelsTableFragment\n}\n\nfragment DatasetLabelsTableFragment on Query {\n  datasetLabels(first: 100) {\n    edges {\n      node {\n        id\n        name\n        description\n        color\n        __typename\n      }\n      cursor\n    }\n    pageInfo {\n      endCursor\n      hasNextPage\n    }\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "985853a7939f44c0cefdd1a91472c67e";
+(node as any).hash = "5d2bdd09afe1ca6b4411604bf97e8f79";
 
 export default node;
