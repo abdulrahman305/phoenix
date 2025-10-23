@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button as AriaButton } from "react-aria-components";
 import { graphql, useLazyLoadQuery } from "react-relay";
 import {
@@ -176,7 +176,18 @@ export function ExperimentCompareDetails({
   const referenceOutput = data.example.revision?.referenceOutput;
   const experimentRuns = data.example.experimentRuns?.edges;
   const experiments = data.dataset.experiments?.edges;
-  const annotationSummaries = data.dataset.experimentAnnotationSummaries;
+  const annotationSummaries = useMemo(() => {
+    return (
+      // we only want to show annotations that are present in at least one experiment run
+      data.dataset.experimentAnnotationSummaries?.filter((summary) =>
+        experimentRuns?.some((run) =>
+          run.run.annotations?.edges.some(
+            (edge) => edge.annotation.name === summary.annotationName
+          )
+        )
+      ) ?? []
+    );
+  }, [data.dataset.experimentAnnotationSummaries, experimentRuns]);
 
   const experimentsById = useMemo(() => {
     const experimentsById: Record<string, Experiment> = {};
@@ -275,7 +286,7 @@ export function ExperimentCompareDetails({
             experimentRepetitionsByExperimentId={
               experimentRepetitionsByExperimentId
             }
-            annotationSummaries={annotationSummaries ?? []}
+            annotationSummaries={annotationSummaries}
             includeRepetitions={Object.values(experimentsById).some(
               (experiment) => experiment.repetitions > 1
             )}
@@ -362,13 +373,11 @@ export function ExperimentRunOutputs() {
           <ul
             css={css`
               flex: 1;
-              display: flex;
-              flex-direction: row;
-              justify-content: flex-start;
-              align-items: flex-start;
-              flex-wrap: none;
-              gap: var(--ac-global-dimension-static-size-200);
               overflow: auto;
+              display: grid;
+              grid-auto-flow: column;
+              align-items: stretch;
+              gap: var(--ac-global-dimension-static-size-200);
               padding: var(--ac-global-dimension-static-size-200);
             `}
           >
@@ -448,25 +457,21 @@ function ExperimentRunOutputsSidebar() {
   const {
     experimentsById,
     annotationSummaries,
-    includeRepetitions,
     baseExperimentId,
     compareExperimentIds,
     sortedExperimentRepetitions,
     selectedExperimentRepetitions,
-    updateExperimentSelection,
-    updateRepetitionSelection,
     toggleAllRepetitionsSelection,
     selectedAnnotation,
     setSelectedAnnotation,
     toggleSortDirection,
+    includeRepetitions,
   } = useExperimentCompareDetailsContext();
 
   const experimentIds = useMemo(
     () => [baseExperimentId, ...compareExperimentIds],
     [baseExperimentId, compareExperimentIds]
   );
-
-  const { baseExperimentColor, getExperimentColor } = useExperimentColors();
 
   const allRepetitionsSelected = useMemo(
     () => selectedExperimentRepetitions.every((run) => run.selected),
@@ -494,6 +499,12 @@ function ExperimentRunOutputsSidebar() {
         gap="size-200"
         alignItems="center"
         justifyContent="space-between"
+        css={css`
+          // vertically align with collapse buttons if they are present
+          padding-left: ${includeRepetitions
+            ? `var(--ac-global-dimension-size-85)`
+            : 0};
+        `}
       >
         <Checkbox
           isSelected={allRepetitionsSelected}
@@ -586,94 +597,141 @@ function ExperimentRunOutputsSidebar() {
         ({ experimentId, experimentRepetitions }) => {
           const experiment = experimentsById[experimentId];
           const experimentIndex = experimentIds.indexOf(experimentId);
-          const allExperimentRunsSelected = areAllExperimentRunsSelected(
-            experimentId,
-            selectedExperimentRepetitions
-          );
-          const someExperimentRunsSelected = areSomeExperimentRunsSelected(
-            experimentId,
-            selectedExperimentRepetitions
-          );
-          const annotationValue = selectedAnnotation
-            ? getAnnotationValue(experimentRepetitions[0], selectedAnnotation)
-            : null;
           return (
-            <Fragment key={experimentId}>
-              <Checkbox
-                isSelected={allExperimentRunsSelected}
-                isIndeterminate={
-                  someExperimentRunsSelected && !allExperimentRunsSelected
-                }
-                onChange={(isSelected) =>
-                  updateExperimentSelection(experimentId, isSelected)
-                }
-              >
-                <Flex
-                  direction="row"
-                  gap="size-200"
-                  alignItems="center"
-                  justifyContent="space-between"
-                  width="100%"
-                  minHeight={30}
-                  marginY="size-25"
-                  css={css`
-                    overflow: hidden;
-                  `}
-                >
-                  <Flex direction="row" gap="size-100" alignItems="center">
-                    <span
-                      css={css`
-                        flex: none;
-                        padding-left: var(--ac-global-dimension-size-50);
-                      `}
-                    >
-                      <ColorSwatch
-                        color={
-                          experimentIndex === 0
-                            ? baseExperimentColor
-                            : getExperimentColor(experimentIndex - 1)
-                        }
-                        shape="circle"
-                      />
-                    </span>
-                    <LineClamp lines={2}>{experiment.name}</LineClamp>
-                  </Flex>
-                  {!includeRepetitions && selectedAnnotation && (
-                    <Text
-                      fontFamily="mono"
-                      css={css`
-                        overflow: hidden;
-                        max-width: 50%;
-                      `}
-                    >
-                      <Truncate maxWidth="100%">
-                        {annotationValue?.score != null
-                          ? floatFormatter(annotationValue.score)
-                          : annotationValue?.label || "--"}
-                      </Truncate>
-                    </Text>
-                  )}
-                </Flex>
-              </Checkbox>
-
-              {includeRepetitions && (
-                <ExperimentRepetitionsSidebarItems
-                  experiment={experiment}
-                  experimentRepetitions={experimentRepetitions}
-                  updateRepetitionSelection={(repetitionNumber, isSelected) =>
-                    updateRepetitionSelection(
-                      experimentId,
-                      repetitionNumber,
-                      isSelected
-                    )
-                  }
-                />
-              )}
-            </Fragment>
+            <ExperimentSidebarItem
+              key={experimentId}
+              experiment={experiment}
+              experimentIndex={experimentIndex}
+              experimentRepetitions={experimentRepetitions}
+            />
           );
         }
       )}
     </div>
+  );
+}
+
+function ExperimentSidebarItem({
+  experiment,
+  experimentIndex,
+  experimentRepetitions,
+}: {
+  experiment: Experiment;
+  experimentIndex: number;
+  experimentRepetitions: ExperimentRepetition[];
+}) {
+  const {
+    selectedExperimentRepetitions,
+    selectedAnnotation,
+    includeRepetitions,
+    updateExperimentSelection,
+    updateRepetitionSelection,
+  } = useExperimentCompareDetailsContext();
+  const { baseExperimentColor, getExperimentColor } = useExperimentColors();
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const allExperimentRunsSelected = areAllExperimentRunsSelected(
+    experiment.id,
+    selectedExperimentRepetitions
+  );
+  const someExperimentRunsSelected = areSomeExperimentRunsSelected(
+    experiment.id,
+    selectedExperimentRepetitions
+  );
+  const annotationValue = selectedAnnotation
+    ? getAnnotationValue(experimentRepetitions[0], selectedAnnotation)
+    : null;
+  return (
+    <>
+      <Flex direction="row" gap="size-75" alignItems="center">
+        {includeRepetitions && (
+          <IconButton
+            size="S"
+            aria-label="Collapse experiment"
+            onPress={() => setIsCollapsed(!isCollapsed)}
+            css={css`
+              flex: none;
+              .ac-icon-wrap {
+                transform: ${isCollapsed ? "rotate(0deg)" : "rotate(90deg)"};
+                transition: all 0.1s ease-in-out;
+              }
+            `}
+          >
+            <Icon svg={<Icons.ChevronRight />} />
+          </IconButton>
+        )}
+        <Checkbox
+          isSelected={allExperimentRunsSelected}
+          isIndeterminate={
+            someExperimentRunsSelected && !allExperimentRunsSelected
+          }
+          onChange={(isSelected) =>
+            updateExperimentSelection(experiment.id, isSelected)
+          }
+        >
+          <Flex
+            direction="row"
+            gap="size-200"
+            alignItems="center"
+            justifyContent="space-between"
+            width="100%"
+            minHeight={30}
+            marginY="size-25"
+            css={css`
+              overflow: hidden;
+            `}
+          >
+            <Flex direction="row" gap="size-100" alignItems="center">
+              <span
+                css={css`
+                  flex: none;
+                  padding-left: var(--ac-global-dimension-size-50);
+                `}
+              >
+                <ColorSwatch
+                  color={
+                    experimentIndex === 0
+                      ? baseExperimentColor
+                      : getExperimentColor(experimentIndex - 1)
+                  }
+                  shape="circle"
+                />
+              </span>
+              <LineClamp lines={2}>{experiment.name}</LineClamp>
+            </Flex>
+            {!includeRepetitions && selectedAnnotation && (
+              <Text
+                fontFamily="mono"
+                css={css`
+                  overflow: hidden;
+                  max-width: 50%;
+                `}
+              >
+                <Truncate maxWidth="100%">
+                  {annotationValue?.score != null
+                    ? floatFormatter(annotationValue.score)
+                    : annotationValue?.label || "--"}
+                </Truncate>
+              </Text>
+            )}
+          </Flex>
+        </Checkbox>
+      </Flex>
+
+      {!isCollapsed && includeRepetitions && (
+        <ExperimentRepetitionsSidebarItems
+          experiment={experiment}
+          experimentRepetitions={experimentRepetitions}
+          updateRepetitionSelection={(repetitionNumber, isSelected) =>
+            updateRepetitionSelection(
+              experiment.id,
+              repetitionNumber,
+              isSelected
+            )
+          }
+        />
+      )}
+    </>
   );
 }
 
@@ -692,7 +750,7 @@ function ExperimentRepetitionsSidebarItems({
   const { selectedExperimentRepetitions, selectedAnnotation } =
     useExperimentCompareDetailsContext();
   return (
-    <View paddingStart="size-300">
+    <View paddingStart="size-750">
       <Flex direction="column">
         {experimentRepetitions.map((repetition) => {
           const selectedAnnotationValue = selectedAnnotation
@@ -764,6 +822,7 @@ const experimentItemCSS = css`
   box-shadow: 0px 8px 8px rgba(0 0 0 / 0.05);
   width: var(--ac-global-dimension-static-size-6000);
   overflow: hidden;
+  height: 100%;
 `;
 
 /**
@@ -799,7 +858,7 @@ export function ExperimentItem({
   const hasTrace = traceId != null && projectId != null;
   return (
     <div css={experimentItemCSS}>
-      <Flex direction="column">
+      <Flex direction="column" height="100%">
         <View paddingX="size-200" paddingTop="size-200" flex="none">
           <Flex direction="row" gap="size-100" alignItems="center">
             <span
@@ -887,7 +946,7 @@ export function ExperimentItem({
                   {experimentRepetition.experimentRun.error}
                 </View>
               ) : (
-                <JSONBlock value={experimentRunOutputStr} />
+                <FullSizeJSONBlock value={experimentRunOutputStr ?? ""} />
               )}
             </View>
           </>
@@ -934,11 +993,11 @@ export function ExperimentRunAnnotations({
         column-gap: var(--ac-global-dimension-size-100);
       `}
     >
-      {annotationSummaries?.map((annotationSummary) => {
+      {annotationSummaries.map((annotationSummary) => {
         const annotation = experimentRun.annotations?.edges.find(
           (edge) => edge.annotation.name === annotationSummary.annotationName
         )?.annotation;
-        return annotation ? (
+        return (
           <li
             key={annotationSummary.annotationName}
             css={css`
@@ -949,20 +1008,10 @@ export function ExperimentRunAnnotations({
             `}
           >
             <ExperimentRunAnnotation
-              annotation={annotation}
+              annotation={annotation ?? null}
               annotationSummary={annotationSummary}
             />
           </li>
-        ) : (
-          // placeholder to ensure alignment when some experiments are missing annotations
-          <li
-            key={annotationSummary.annotationName}
-            aria-hidden="true"
-            css={css`
-              height: var(--ac-global-dimension-size-350);
-              grid-column: 1 / -1;
-            `}
-          />
         );
       })}
     </ul>
@@ -973,31 +1022,43 @@ function ExperimentRunAnnotationButton({
   annotation,
   annotationSummary,
 }: {
-  annotation: Annotation;
+  annotation: Annotation | null;
   annotationSummary: AnnotationSummaries[number];
 }) {
-  const annotationColor = useWordColor(annotation.name);
+  const annotationColor = useWordColor(annotationSummary.annotationName);
   const labelValue =
-    annotation.score != null
-      ? formatFloat(annotation.score)
-      : annotation.label || "--";
+    annotation?.score != null
+      ? formatFloat(annotation?.score)
+      : annotation?.label || "--";
+
+  const WrapperElement = annotation
+    ? AriaButton // using AriaButton to ensure the popover works
+    : "div";
+
+  const ghostAnnotationCss = css`
+    opacity: 0.25;
+    pointer-events: none;
+  `;
 
   return (
-    <AriaButton // using AriaButton to ensure the popover works
+    <WrapperElement
       className="button--reset"
-      css={css`
-        cursor: pointer;
-        padding: var(--ac-global-dimension-size-50)
-          var(--ac-global-dimension-size-100);
-        border-radius: var(--ac-global-rounding-small);
-        width: 100%;
-        display: grid;
-        grid-template-columns: subgrid;
-        grid-column: 1 / -2;
-        &:hover {
-          background-color: var(--ac-global-color-grey-200);
-        }
-      `}
+      css={[
+        css`
+          cursor: pointer;
+          padding: var(--ac-global-dimension-size-50)
+            var(--ac-global-dimension-size-100);
+          border-radius: var(--ac-global-rounding-small);
+          width: 100%;
+          display: grid;
+          grid-template-columns: subgrid;
+          grid-column: 1 / -2;
+          &:hover {
+            background-color: var(--ac-global-color-grey-200);
+          }
+        `,
+        !annotation && ghostAnnotationCss,
+      ]}
     >
       <Flex
         direction="row"
@@ -1012,11 +1073,15 @@ function ExperimentRunAnnotationButton({
             flex: none;
           `}
         >
-          <AnnotationColorSwatch annotationName={annotation.name} />
+          <AnnotationColorSwatch
+            annotationName={annotationSummary.annotationName}
+          />
         </span>
 
         <Text color="inherit" minWidth={0}>
-          <Truncate maxWidth="100%">{annotation.name}</Truncate>
+          <Truncate maxWidth="100%">
+            {annotationSummary.annotationName}
+          </Truncate>
         </Text>
       </Flex>
 
@@ -1024,25 +1089,21 @@ function ExperimentRunAnnotationButton({
         <Truncate maxWidth="100%">{labelValue}</Truncate>
       </Text>
 
-      {annotation.score != null ? (
-        <ProgressBar
-          css={css`
-            align-self: center;
-            --mod-barloader-fill-color: ${annotationColor};
-          `}
-          value={calculateAnnotationScorePercentile(
-            annotation.score,
-            annotationSummary.minScore,
-            annotationSummary.maxScore
-          )}
-          height="var(--ac-global-dimension-size-50)"
-          width="100%"
-          aria-label={`${annotation.name} score`}
-        />
-      ) : (
-        <div /> // placeholder for grid layout
-      )}
-    </AriaButton>
+      <ProgressBar
+        css={css`
+          align-self: center;
+          --mod-barloader-fill-color: ${annotationColor};
+        `}
+        value={calculateAnnotationScorePercentile(
+          annotation?.score ?? 0,
+          annotationSummary.minScore,
+          annotationSummary.maxScore
+        )}
+        height="var(--ac-global-dimension-size-50)"
+        width="100%"
+        aria-label={`${annotationSummary.annotationName} score`}
+      />
+    </WrapperElement>
   );
 }
 
@@ -1050,49 +1111,56 @@ function ExperimentRunAnnotation({
   annotation,
   annotationSummary,
 }: {
-  annotation: Annotation;
+  annotation: Annotation | null;
   annotationSummary: AnnotationSummaries[number];
 }) {
   const { openTraceDialog } = useExperimentCompareDetailsContext();
-  const traceId = annotation.trace?.traceId;
-  const projectId = annotation.trace?.projectId;
+  const traceId = annotation?.trace?.traceId;
+  const projectId = annotation?.trace?.projectId;
   const hasTrace = traceId != null && projectId != null;
   return (
     <>
-      <DialogTrigger>
+      {annotation ? (
+        <DialogTrigger>
+          <ExperimentRunAnnotationButton
+            annotation={annotation}
+            annotationSummary={annotationSummary}
+          />
+          <Popover placement="top">
+            <PopoverArrow />
+            <Dialog style={{ width: 400 }}>
+              <View padding="size-200">
+                <AnnotationDetailsContent annotation={annotation} />
+              </View>
+            </Dialog>
+          </Popover>
+        </DialogTrigger>
+      ) : (
         <ExperimentRunAnnotationButton
           annotation={annotation}
           annotationSummary={annotationSummary}
         />
-        <Popover placement="top">
-          <PopoverArrow />
-          <Dialog style={{ width: 400 }}>
-            <View padding="size-200">
-              <AnnotationDetailsContent annotation={annotation} />
-            </View>
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
-      {hasTrace ? (
-        <TooltipTrigger>
-          <IconButton
-            size="S"
-            aria-label="View evaluation trace"
-            onPress={() => {
-              openTraceDialog(
-                traceId,
-                projectId,
-                `Evaluator Trace: ${annotation.name}`
-              );
-            }}
-          >
-            <Icon svg={<Icons.Trace />} />
-          </IconButton>
-          <Tooltip>View evaluation trace</Tooltip>
-        </TooltipTrigger>
-      ) : (
-        <div /> // placeholder for grid layout
       )}
+      <TooltipTrigger>
+        <IconButton
+          size="S"
+          isDisabled={!hasTrace}
+          aria-label="View evaluation trace"
+          onPress={() => {
+            if (!hasTrace) {
+              return;
+            }
+            openTraceDialog(
+              traceId,
+              projectId,
+              `Evaluator Trace: ${annotationSummary.annotationName}`
+            );
+          }}
+        >
+          <Icon svg={<Icons.Trace />} />
+        </IconButton>
+        <Tooltip>View evaluation trace</Tooltip>
+      </TooltipTrigger>
     </>
   );
 }
