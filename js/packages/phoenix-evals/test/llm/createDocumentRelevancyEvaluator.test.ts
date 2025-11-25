@@ -1,7 +1,8 @@
-import { openai } from "@ai-sdk/openai";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDocumentRelevancyEvaluator } from "../../src/llm/createDocumentRelevancyEvaluator";
 import * as generateClassificationModule from "../../src/llm/generateClassification";
+
+import { openai } from "@ai-sdk/openai";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("createDocumentRelevancyEvaluator", () => {
   beforeEach(() => {
@@ -47,9 +48,14 @@ describe("createDocumentRelevancyEvaluator", () => {
     expect(mockGenerateClassification).toHaveBeenCalledWith(
       expect.objectContaining({
         labels: ["relevant", "unrelated"],
-        prompt: expect.stringContaining(
-          "You are comparing a document to a question"
-        ),
+        prompt: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining(
+              "You are comparing a document to a question"
+            ),
+          }),
+        ]),
       })
     );
 
@@ -238,12 +244,22 @@ describe("createDocumentRelevancyEvaluator", () => {
     // Verify that the prompt contains the interpolated values
     expect(mockGenerateClassification).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringContaining(testInput),
+        prompt: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining(testInput),
+          }),
+        ]),
       })
     );
     expect(mockGenerateClassification).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringContaining(testOutput),
+        prompt: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining(testOutput),
+          }),
+        ]),
       })
     );
   });

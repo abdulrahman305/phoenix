@@ -1,26 +1,33 @@
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { graphql, useLazyLoadQuery, useMutation } from "react-relay";
-import { css } from "@emotion/react";
 
 import {
   Autocomplete,
   Button,
+  ButtonProps,
   Checkbox,
   Flex,
-  Heading,
   Icon,
   IconButton,
   Icons,
   Input,
   Loading,
   Menu,
+  MenuContainer,
+  MenuHeader,
+  MenuHeaderTitle,
   MenuItem,
   MenuTrigger,
-  Popover,
   SearchField,
   Token,
   useFilter,
-  View,
 } from "@phoenix/components";
 import { NewDatasetSplitForm } from "@phoenix/components/datasetSplit/NewDatasetSplitForm";
 import { useDatasetSplitMutations } from "@phoenix/components/datasetSplit/useDatasetSplitMutations";
@@ -34,6 +41,7 @@ type ExamplesSplitMenuProps = {
   selectedSplitIds: string[];
   selectedExampleIds: string[];
   examplesCache: ExamplesCache;
+  size?: ButtonProps["size"];
 };
 
 const getInitialMode = (selectedExampleIds: string[]) => {
@@ -50,6 +58,18 @@ const getInitialMode = (selectedExampleIds: string[]) => {
  * In filter mode, the user can select splits from a list.
  * In apply mode, the user can select splits to add or remove from the selected examples.
  * In create mode, the user can create a new split.
+ *
+ * You can skip "filter" mode for single example use cases by passing in an empty array for selectedSplitIds,
+ * and pre-populating the selectedExampleIds with the single example id and examplesCache with the single example.
+ * @example
+ * <ExamplesSplitMenu
+ *   onSelectionChange={() => {}}
+ *   onExampleSelectionChange={() => {}}
+ *   selectedSplitIds={[]}
+ *   selectedExampleIds={["123"]}
+ *   // ensure this comes from relay so that it updates when the example splits are updated
+ *   examplesCache={{ "123": { id: "123", datasetSplits: [{ id: "456", name: "Split 1" }] } }}
+ * />
  */
 export const ExamplesSplitMenu = ({
   onSelectionChange,
@@ -57,10 +77,13 @@ export const ExamplesSplitMenu = ({
   selectedSplitIds,
   selectedExampleIds,
   examplesCache,
+  size,
 }: ExamplesSplitMenuProps) => {
   const [mode, setMode] = useState<"filter" | "apply" | "create">(() =>
     getInitialMode(selectedExampleIds)
   );
+  const [isMenuOpen, setIsMenuOpen] = useState(false); // used to keep the menu open when a split is applied
+  const shouldKeepMenuOpenRef = useRef(false); // required as menu is no longer multi-select
   useEffect(() => {
     setMode(getInitialMode(selectedExampleIds));
   }, [selectedExampleIds]);
@@ -78,30 +101,35 @@ export const ExamplesSplitMenu = ({
   const selectedPartialExamples = useMemo(() => {
     return selectedExampleIds.map((id) => examplesCache[id]).filter(Boolean);
   }, [selectedExampleIds, examplesCache]);
+  const requestKeepMenuOpen = useCallback(() => {
+    shouldKeepMenuOpenRef.current = true;
+  }, []);
 
   return (
     <MenuTrigger
+      isOpen={isMenuOpen}
       onOpenChange={(open) => {
+        if (!open && shouldKeepMenuOpenRef.current) {
+          shouldKeepMenuOpenRef.current = false;
+          setIsMenuOpen(true);
+          return;
+        }
+        shouldKeepMenuOpenRef.current = false;
+        setIsMenuOpen(open);
         if (!open) {
           setMode(getInitialMode(selectedExampleIds));
         }
       }}
     >
-      <Button leadingVisual={<Icon svg={<Icons.PriceTagsOutline />} />}>
+      <Button
+        leadingVisual={<Icon svg={<Icons.PriceTagsOutline />} />}
+        size={size}
+      >
         Splits
         {selectedSplitIds.length > 0 ? ` (${selectedSplitIds.length})` : ""}
       </Button>
-      <Popover>
-        <Suspense
-          fallback={
-            <Loading
-              css={css`
-                min-width: 300px;
-                min-height: 300px;
-              `}
-            />
-          }
-        >
+      <MenuContainer>
+        <Suspense fallback={<Loading />}>
           {(mode === "filter" || mode === "apply") && (
             <SplitMenu
               selectedSplitIds={selectedSplitIds}
@@ -110,6 +138,7 @@ export const ExamplesSplitMenu = ({
               onExampleSelectionChange={onExampleSelectionChange}
               selectedPartialExamples={selectedPartialExamples}
               setMode={setMode}
+              onRequestKeepMenuOpen={requestKeepMenuOpen}
             />
           )}
           {mode === "create" && (
@@ -119,7 +148,7 @@ export const ExamplesSplitMenu = ({
             />
           )}
         </Suspense>
-      </Popover>
+      </MenuContainer>
     </MenuTrigger>
   );
 };
@@ -136,6 +165,7 @@ const SplitMenu = ({
   onSelectionChange,
   selectedPartialExamples,
   setMode,
+  onRequestKeepMenuOpen,
 }: {
   selectedSplitIds: string[];
   selectedExampleIds: string[];
@@ -146,6 +176,7 @@ const SplitMenu = ({
     datasetSplits: { id: string; name: string }[];
   }[];
   setMode: (mode: "filter" | "apply" | "create") => void;
+  onRequestKeepMenuOpen: () => void;
 }) => {
   const { contains } = useFilter({ sensitivity: "base" });
   const data = useLazyLoadQuery<ExamplesSplitMenuQuery>(
@@ -166,28 +197,12 @@ const SplitMenu = ({
     // fetch when menu is opened, but show cache data first to prevent flickering
     { fetchPolicy: "store-and-network" }
   );
-  const [addExamplesToSplits] = useMutation(graphql`
-    mutation ExamplesSplitMenuAddDatasetExamplesToDatasetSplitsMutation(
-      $input: AddDatasetExamplesToDatasetSplitsInput!
+  const [setExampleSplits] = useMutation(graphql`
+    mutation ExamplesSplitMenuSetDatasetExampleSplitsMutation(
+      $input: SetDatasetExampleSplitsInput!
     ) {
-      addDatasetExamplesToDatasetSplits(input: $input) {
-        examples {
-          id
-          datasetSplits {
-            id
-            name
-            color
-          }
-        }
-      }
-    }
-  `);
-  const [removeExamplesFromSplit] = useMutation(graphql`
-    mutation ExamplesSplitMenuRemoveDatasetExamplesFromDatasetSplitMutation(
-      $input: RemoveDatasetExamplesFromDatasetSplitsInput!
-    ) {
-      removeDatasetExamplesFromDatasetSplits(input: $input) {
-        examples {
+      setDatasetExampleSplits(input: $input) {
+        example {
           id
           datasetSplits {
             id
@@ -199,57 +214,26 @@ const SplitMenu = ({
     }
   `);
   const onUpdateSplits = useCallback(
-    (changes: {
-      selectedExampleIds: string[];
-      addSplitIds?: string[];
-      removeSplitIds?: string[];
-    }) => {
-      if (changes.addSplitIds) {
-        addExamplesToSplits({
-          variables: {
-            input: {
-              exampleIds: changes.selectedExampleIds,
-              datasetSplitIds: changes.addSplitIds,
-            },
+    (changes: { exampleId: string; splitIds: string[] }) => {
+      setExampleSplits({
+        variables: {
+          input: {
+            exampleId: changes.exampleId,
+            datasetSplitIds: changes.splitIds,
           },
-        });
-      }
-      if (changes.removeSplitIds) {
-        removeExamplesFromSplit({
-          variables: {
-            input: {
-              exampleIds: changes.selectedExampleIds,
-              datasetSplitIds: changes.removeSplitIds,
-            },
-          },
-        });
-      }
+        },
+      });
     },
-    [addExamplesToSplits, removeExamplesFromSplit]
+    [setExampleSplits]
   );
   const splits = useMemo(() => {
     return data.datasetSplits.edges.map((edge) => edge.split);
   }, [data]);
   return (
     <Autocomplete filter={contains}>
-      <View
-        padding="size-200"
-        paddingTop="size-100"
-        borderBottomWidth="thin"
-        borderColor="dark"
-        minWidth={300}
-      >
-        <Flex direction="column" gap="size-100">
-          <Flex
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
-          >
-            <Heading level={4} weight="heavy">
-              {selectedExampleIds.length > 0
-                ? "Apply splits to selected examples"
-                : "Filter examples by splits"}
-            </Heading>
+      <MenuHeader>
+        <MenuHeaderTitle
+          trailingContent={
             <IconButton
               size="S"
               onPress={() => {
@@ -258,12 +242,18 @@ const SplitMenu = ({
             >
               <Icon svg={<Icons.PlusOutline />} />
             </IconButton>
-          </Flex>
-          <SearchField aria-label="Search" autoFocus>
-            <Input placeholder="Search splits" />
-          </SearchField>
-        </Flex>
-      </View>
+          }
+        >
+          {selectedExampleIds.length > 0
+            ? selectedExampleIds.length === 1
+              ? "Apply splits to example"
+              : "Apply splits to selected examples"
+            : "Filter examples by splits"}
+        </MenuHeaderTitle>
+        <SearchField aria-label="Search" autoFocus>
+          <Input placeholder="Search splits" />
+        </SearchField>
+      </MenuHeader>
       {selectedExampleIds.length === 0 ? (
         <SplitMenuFilterContent
           selectedSplitIds={selectedSplitIds}
@@ -275,6 +265,7 @@ const SplitMenu = ({
           onSelectionChange={onUpdateSplits}
           splits={splits as Mutable<typeof splits>}
           selectedPartialExamples={selectedPartialExamples}
+          onRequestKeepMenuOpen={onRequestKeepMenuOpen}
         />
       )}
     </Autocomplete>
@@ -332,17 +323,18 @@ const SplitMenuApplyContent = ({
   onSelectionChange,
   splits,
   selectedPartialExamples,
+  onRequestKeepMenuOpen,
 }: {
   onSelectionChange: (changes: {
-    selectedExampleIds: string[];
-    addSplitIds?: string[];
-    removeSplitIds?: string[];
+    exampleId: string;
+    splitIds: string[];
   }) => void;
   splits: { id: string; name: string; color: string }[];
   selectedPartialExamples: {
     id: string;
     datasetSplits: { id: string; name: string }[];
   }[];
+  onRequestKeepMenuOpen: () => void;
 }) => {
   // derive checkbox states for each split based on the selectedPartialExamples
   type SplitState = Record<string, "checked" | "indeterminate" | "unchecked">;
@@ -369,32 +361,44 @@ const SplitMenuApplyContent = ({
       return acc;
     }, {} as SplitState);
   }, [splits, selectedPartialExamples]);
+  const handleSplitToggle = useCallback(
+    (selectedId: string) => {
+      // because the menu is no longer multi-select, we need to keep the menu open when a split is applied
+      onRequestKeepMenuOpen();
+      for (const example of selectedPartialExamples) {
+        const currentSplitIds = example.datasetSplits.map((s) => s.id);
+        let newSplitIds: string[];
+
+        if (splitStates[selectedId] === "checked") {
+          newSplitIds = currentSplitIds.filter((id) => id !== selectedId);
+        } else {
+          newSplitIds = currentSplitIds.includes(selectedId)
+            ? currentSplitIds
+            : [...currentSplitIds, selectedId];
+        }
+
+        onSelectionChange({
+          exampleId: example.id,
+          splitIds: newSplitIds,
+        });
+      }
+    },
+    [
+      onRequestKeepMenuOpen,
+      onSelectionChange,
+      selectedPartialExamples,
+      splitStates,
+    ]
+  );
   return (
     <Menu
       items={splits}
       renderEmptyState={() => "No splits found"}
-      // hack to keep the menu open when splits are changed
-      selectedKeys={[]}
-      selectionMode="multiple"
+      // NOTE: Menu is no longer multi-select, so we track the menu open state manually
+      selectionMode="none"
       // ensure that menu items are re-rendered when splitStates changes
       dependencies={[splitStates]}
-      // update selection state externally, the menu does not actually know what is selected
-      onSelectionChange={(keys) => {
-        const selectedId = Array.from(keys as Set<string>)[0];
-        if (splitStates[selectedId] === "checked") {
-          // remove split from all selected examples
-          onSelectionChange({
-            selectedExampleIds: selectedPartialExamples.map((e) => e.id),
-            removeSplitIds: [selectedId],
-          });
-        } else {
-          // state is indeterminate or unchecked, add split to all selected examples
-          onSelectionChange({
-            selectedExampleIds: selectedPartialExamples.map((e) => e.id),
-            addSplitIds: [selectedId],
-          });
-        }
-      }}
+      onAction={(key) => handleSplitToggle(key as string)}
     >
       {({ id, name, color }) => (
         <MenuItem id={id} textValue={name}>
@@ -431,32 +435,27 @@ const SplitMenuCreateContent = ({
     onCompleted,
   });
   return (
-    <Flex direction="column">
-      <View
-        padding="size-100"
-        paddingTop="size-100"
-        borderBottomWidth="thin"
-        borderColor="dark"
-        minWidth={300}
-      >
-        <Flex gap="size-100" alignItems="center">
-          <IconButton onPress={() => setMode("filter")} size="S">
-            <Icon svg={<Icons.ChevronLeft />} />
-          </IconButton>
-          <Heading level={4} weight="heavy">
-            Create Split
-            {selectedExampleIds.length > 0
-              ? " for " + selectedExampleIds.length + " examples"
-              : ""}
-          </Heading>
-        </Flex>
-      </View>
-      <View maxWidth={300}>
-        <NewDatasetSplitForm
-          onSubmit={onSubmit}
-          isSubmitting={isCreatingDatasetSplit}
-        />
-      </View>
-    </Flex>
+    <>
+      <MenuHeader>
+        <MenuHeaderTitle
+          leadingContent={
+            <IconButton onPress={() => setMode("filter")} size="S">
+              <Icon svg={<Icons.ChevronLeft />} />
+            </IconButton>
+          }
+        >
+          Create Split
+          {selectedExampleIds.length > 0
+            ? " for " +
+              selectedExampleIds.length +
+              (selectedExampleIds.length === 1 ? " example" : " examples")
+            : ""}
+        </MenuHeaderTitle>
+      </MenuHeader>
+      <NewDatasetSplitForm
+        onSubmit={onSubmit}
+        isSubmitting={isCreatingDatasetSplit}
+      />
+    </>
   );
 };

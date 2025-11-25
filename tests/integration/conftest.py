@@ -146,7 +146,7 @@ def _users(
             resp = _httpx_client(app, app.admin_secret).post(url=url, json=json_)
             resp.raise_for_status()
             gid = _GqlId(cast(v1.CreateUserResponseBody, resp.json())["data"]["id"])
-            app, role, profile = yield _User(gid, role, profile)
+            app, role, profile = yield _User(gid, role, profile, profile_picture_url=None)
 
     g = _()
     next(g)
@@ -157,7 +157,7 @@ def _users(
 def _new_user(
     _users: _UserGenerator,
 ) -> Iterator[_UserFactory]:
-    clean_ups: list[Callable[[], None]] = []
+    clean_ups: list[Callable[[], list[_GqlId]]] = []
 
     def _(
         app: _AppInfo,

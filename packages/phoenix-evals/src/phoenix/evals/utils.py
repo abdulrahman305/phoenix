@@ -1,5 +1,7 @@
+import functools
 import inspect
 import json
+import warnings
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Union
 
 import pandas as pd
@@ -25,6 +27,82 @@ from phoenix.evals.legacy.utils import (
 )
 
 InputMappingType = Optional[Mapping[str, Union[str, Callable[[Mapping[str, Any]], Any]]]]
+
+
+def _deprecate_positional_args(
+    func_name: str,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """
+    Decorator to issue deprecation warnings for positional argument usage.
+
+    Args:
+        func_name: Name of the function being decorated (for warning message)
+    """
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Issue deprecation warning if called with ANY positional arguments
+            if len(args) > 0:
+                warnings.warn(
+                    f"Positional arguments for {func_name} are deprecated and will be removed "
+                    f"in a future version. Please use keyword arguments instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def _deprecate_source_and_heuristic(func: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Decorator to deprecate the 'source' argument in favor of 'kind'.
+
+    Args:
+        func (Callable[..., Any]): Function to be decorated that may receive
+            a deprecated 'source' argument.
+
+    Returns:
+        Callable[..., Any]: Wrapper function that converts 'source' argument
+            to 'kind' and issues deprecation warning.
+    """
+    # TODO:Remove this once the `source` arg in Scores/Evaluators is no longer supported
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        signature = inspect.signature(func)
+
+        # Prevent silent override if both 'kind' and deprecated 'source' are provided and differ
+        if "source" in kwargs and "kind" in kwargs and kwargs["kind"] != kwargs["source"]:
+            raise ValueError("Provide only one of 'kind' or 'source' (they differ). Use 'kind'.")
+
+        if "source" in kwargs:
+            warnings.warn(
+                "'source' is deprecated; next time, use 'kind' instead. This time, we'll \
+                automatically convert it for you.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Only set kind from source if kind wasn't already provided (or equal)
+            if "kind" not in kwargs:
+                kwargs["kind"] = kwargs["source"]
+            kwargs.pop("source")
+        if kwargs.get("kind") == "heuristic":
+            warnings.warn(
+                "Kind 'heuristic' is deprecated; next time, use 'code' instead. This time, we'll \
+                automatically convert it for you.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            kwargs["kind"] = "code"
+        bound_args = signature.bind_partial(*args, **kwargs)
+        bound_args.apply_defaults()
+        return func(*bound_args.args, **bound_args.kwargs)
+
+    return wrapper
 
 
 # --- Input Map/Transform Helpers ---
@@ -68,6 +146,7 @@ def _bind_mapping_function(
     return mapping_function(**bound.arguments)
 
 
+@_deprecate_positional_args("remap_eval_input")
 def remap_eval_input(
     eval_input: Mapping[str, Any],
     required_fields: Set[str],
@@ -245,7 +324,7 @@ def _format_score_data(
     eval_df = dataframe[span_id_cols + [score_column]].copy()
 
     # Parse JSON score data
-    cols = ["score", "label", "explanation", "source"]
+    cols = ["score", "label", "explanation", "kind"]
 
     def _safe_json_load(x: Any) -> Any:
         if isinstance(x, str):
@@ -265,18 +344,24 @@ def _format_score_data(
         lambda d: _merge_metadata_with_direction(d) if d else None
     )
 
-    # Infer annotator_kind from score.source in first non-null score
+    # Infer annotator_kind from score.kind (preferred) or score.source in first non-null score
+    # TODO: Update this once we deprecate the source attribute
     annotator_kind = "LLM"  # default
     if not parsed_score_col.isna().all():
         no_na = parsed_score_col.dropna()
         first_score = None if no_na.empty else no_na.iloc[0]
-        if first_score and isinstance(first_score, dict) and "source" in first_score:
-            source = first_score["source"]
-            if source == "heuristic":
+        if first_score and isinstance(first_score, dict):
+            source_or_kind = None
+            if "kind" in first_score:
+                source_or_kind = first_score["kind"]
+            elif "source" in first_score:
+                source_or_kind = first_score["source"]
+            # TODO: Remove this once we deprecate heuristic kind
+            if source_or_kind in ["heuristic", "code"]:
                 annotator_kind = "CODE"
-            elif source == "llm":
+            elif source_or_kind == "llm":
                 annotator_kind = "LLM"
-            elif source == "human":
+            elif source_or_kind == "human":
                 annotator_kind = "HUMAN"
 
     # Add annotation name and kind columns
@@ -297,6 +382,7 @@ def _format_score_data(
     return eval_df
 
 
+@_deprecate_positional_args("to_annotation_dataframe")
 def to_annotation_dataframe(
     dataframe: pd.DataFrame,
     score_names: Optional[List[str]] = None,

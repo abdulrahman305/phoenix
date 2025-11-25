@@ -10,7 +10,7 @@ import {
   DialogTitleExtra,
 } from "@phoenix/components/dialog";
 
-type FeatureFlag = "evaluators" | "datasetSplitsUI";
+type FeatureFlag = "evaluators";
 export type FeatureFlagsContextType = {
   featureFlags: Record<FeatureFlag, boolean>;
   setFeatureFlags: (featureFlags: Record<FeatureFlag, boolean>) => void;
@@ -20,7 +20,6 @@ export const LOCAL_STORAGE_FEATURE_FLAGS_KEY = "arize-phoenix-feature-flags";
 
 const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   evaluators: false,
-  datasetSplitsUI: false,
 };
 
 function getFeatureFlags(): Record<FeatureFlag, boolean> {
@@ -34,7 +33,7 @@ function getFeatureFlags(): Record<FeatureFlag, boolean> {
   try {
     const parsedFeatureFlags = JSON.parse(featureFlagsFromLocalStorage);
     return Object.assign({}, DEFAULT_FEATURE_FLAGS, parsedFeatureFlags);
-  } catch (e) {
+  } catch (_e) {
     return DEFAULT_FEATURE_FLAGS;
   }
 }
