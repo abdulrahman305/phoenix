@@ -6,3 +6,4 @@ sphinx_design
 packages/phoenix-evals
 
 -e .
+urllib3>=2.6.3 # not directly required, pinned by Snyk to avoid a vulnerability
